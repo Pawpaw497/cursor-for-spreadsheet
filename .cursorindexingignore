@@ -1,0 +1,4 @@
+# Indexing-only ignores (files may still be opened or @-mentioned).
+# Docs: https://cursor.com/docs/reference/ignore-file
+#
+# This repo is small; leave empty or add large generated trees here as the project grows.

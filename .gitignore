@@ -8,6 +8,7 @@
 example.env
 py.env
 server/.env
+server/data/
 
 # 仅作本地使用的路径
 /.history
@@ -17,9 +18,9 @@ server/.env
 # - 后端唯一环境目录：server/.venv（在 server/ 下执行 uv sync，与 pyproject.toml / uv.lock 对齐）。
 # - 勿在仓库根目录创建 .venv 或 venv；下方 Python 模板规则会忽略任意路径下的同名目录。
 
-# 按团队约定不纳入版本库（README「更多文档」中路径为本地约定，非仓库内文件）
+# 本地脚本与私人笔记（canonical 技术文档见 docs/，默认纳入版本库）
 scripts/
-docs/
+docs/local/
 
 # =============================================================================
 # Python — https://github.com/github/gitignore/blob/main/Python.gitignore
