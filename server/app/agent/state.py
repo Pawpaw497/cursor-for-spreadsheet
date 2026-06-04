@@ -7,6 +7,9 @@ from __future__ import annotations
 
 from app.models.agent_models import (
     AgentState,
+    PreviewDecisionKind,
+    PreviewRecord,
+    PreviewStatus,
     TableContext,
     initial_state_from_agent_project_request,
     initial_state_from_plan_request,
@@ -15,6 +18,9 @@ from app.models.agent_models import (
 
 __all__ = [
     "AgentState",
+    "PreviewDecisionKind",
+    "PreviewRecord",
+    "PreviewStatus",
     "TableContext",
     "initial_state_from_agent_project_request",
     "initial_state_from_plan_request",

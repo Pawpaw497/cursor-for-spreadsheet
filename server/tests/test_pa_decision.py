@@ -1,0 +1,227 @@
+"""Pydantic AI pa_decision_step: mocked single-turn runs, Approach A (no in-PA tool exec)."""
+from __future__ import annotations
+
+import asyncio
+import json
+from unittest.mock import patch
+
+import pytest
+from pydantic_ai.messages import ToolCallPart
+
+from app.agent.actions import (
+    AskClarificationAction,
+    CallToolAction,
+    FinishAction,
+    OutputPlanAction,
+)
+from app.agent.pa_decision import PaTurnResult, pa_decision_step
+from app.models.agent_models import AgentState, TableContext
+from app.models.plan import Plan
+
+
+def _minimal_plan() -> Plan:
+    return Plan.model_validate(
+        {
+            "intent": "add x",
+            "steps": [
+                {"action": "add_column", "name": "x", "expression": "1"},
+            ],
+        }
+    )
+
+
+def _turn_tools(*parts: ToolCallPart) -> PaTurnResult:
+    return PaTurnResult(tool_parts=list(parts), text="", structured_plan=None)
+
+
+def _turn_plan(plan: Plan | None = None) -> PaTurnResult:
+    return PaTurnResult(
+        tool_parts=[],
+        text="",
+        structured_plan=plan or _minimal_plan(),
+    )
+
+
+def _state(*, max_turns: int = 10, tables_count: int = 1) -> AgentState:
+    tables = [
+        TableContext(
+            name="Sheet1",
+            schema=[{"key": "a", "type": "string"}],
+            sample_rows=[{"a": "v"}],
+        )
+    ]
+    if tables_count > 1:
+        tables.append(
+            TableContext(name="Sheet2", schema=[{"key": "b", "type": "string"}], sample_rows=[])
+        )
+    return AgentState(
+        tables=tables,
+        messages=[],
+        user_prompt="Add column",
+        model_source="cloud",
+        max_turns=max_turns,
+    )
+
+
+def test_pa_decision_max_turns() -> None:
+    state = _state(max_turns=0)
+
+    async def run() -> None:
+        _, action = await pa_decision_step(state, use_tools=True)
+        assert isinstance(action, FinishAction)
+        assert action.payload and action.payload.reason == "max_turns"
+
+    asyncio.run(run())
+
+
+def test_pa_decision_tool_call_without_run_tool() -> None:
+    state = _state()
+
+    async def run() -> None:
+        turn = _turn_tools(
+            ToolCallPart(
+                tool_name="get_schema",
+                args={"table_name": "Sheet1"},
+                tool_call_id="tc1",
+            )
+        )
+        with patch(
+            "app.agent.pa_decision._run_pa_single_turn",
+            return_value=turn,
+        ), patch("app.services.tools.run_tool") as m_run:
+            new_state, action = await pa_decision_step(state, use_tools=True)
+            m_run.assert_not_called()
+            assert isinstance(action, CallToolAction)
+            assert action.payload.tool_name == "get_schema"
+            assert new_state.current_turn == 1
+
+    asyncio.run(run())
+
+
+def test_pa_decision_output_plan_structured() -> None:
+    state = _state()
+
+    async def run() -> None:
+        with patch(
+            "app.agent.pa_decision._run_pa_single_turn",
+            return_value=_turn_plan(),
+        ):
+            _, action = await pa_decision_step(state, use_tools=True)
+            assert isinstance(action, OutputPlanAction)
+            assert action.payload.intent == "add x"
+
+    asyncio.run(run())
+
+
+def test_pa_decision_empty_response() -> None:
+    state = _state()
+
+    async def run() -> None:
+        with patch(
+            "app.agent.pa_decision._run_pa_single_turn",
+            return_value=PaTurnResult([], "", None),
+        ):
+            _, action = await pa_decision_step(state, use_tools=True)
+            assert isinstance(action, FinishAction)
+            assert action.payload and action.payload.reason == "empty_response"
+
+    asyncio.run(run())
+
+
+def test_pa_decision_final_result_failed_not_empty_response() -> None:
+    state = _state()
+
+    async def run() -> None:
+        turn = PaTurnResult(
+            tool_parts=[],
+            text="",
+            structured_plan=None,
+            final_result_error="validation error preview",
+        )
+        with patch(
+            "app.agent.pa_decision._run_pa_single_turn",
+            return_value=turn,
+        ):
+            _, action = await pa_decision_step(state, use_tools=True)
+            assert isinstance(action, FinishAction)
+            assert action.payload
+            reason = action.payload.reason or ""
+            assert reason.startswith("plan_validation_failed:")
+            assert "empty_response" not in reason
+
+    asyncio.run(run())
+
+
+def test_pa_decision_invalid_tool_args_retries() -> None:
+    state = _state(max_turns=5)
+    calls = 0
+
+    async def mock_turn(*_a: object, **_k: object) -> PaTurnResult:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return _turn_tools(
+                ToolCallPart(
+                    tool_name="get_schema",
+                    args="not-a-dict",  # type: ignore[arg-type]
+                    tool_call_id="tc1",
+                )
+            )
+        return _turn_plan()
+
+    async def run() -> None:
+        with patch("app.agent.pa_decision._run_pa_single_turn", side_effect=mock_turn):
+            _, action = await pa_decision_step(state, use_tools=True)
+            assert calls >= 2
+            assert isinstance(action, OutputPlanAction)
+
+    asyncio.run(run())
+
+
+def test_pa_decision_clarification_multi_table() -> None:
+    plan = Plan.model_validate(
+        {
+            "intent": "ambiguous",
+            "steps": [{"action": "add_column", "name": "x", "expression": "1"}],
+        }
+    )
+    state = _state(tables_count=2)
+
+    async def run() -> None:
+        with patch(
+            "app.agent.pa_decision._run_pa_single_turn",
+            return_value=_turn_plan(plan),
+        ):
+            _, action = await pa_decision_step(state, use_tools=True)
+            assert isinstance(action, AskClarificationAction)
+
+    asyncio.run(run())
+
+
+def test_pa_decision_tool_append_message_shape() -> None:
+    """Parity with test_agent_message_shape: tool path seeds user context."""
+    from app.agent.agent_helpers import run_tool_and_append_messages
+
+    state = _state()
+
+    async def run() -> None:
+        turn = _turn_tools(
+            ToolCallPart(
+                tool_name="get_schema",
+                args={},
+                tool_call_id="call_test_1",
+            )
+        )
+        with patch(
+            "app.agent.pa_decision._run_pa_single_turn",
+            return_value=turn,
+        ), patch("app.services.tools.run_tool", return_value="{}"):
+            after_decision, action = await pa_decision_step(state, use_tools=True)
+            assert isinstance(action, CallToolAction)
+            final_state = run_tool_and_append_messages(after_decision, action)
+            assert final_state.messages[0]["role"] == "user"
+            assert state.user_prompt in final_state.messages[0]["content"]
+            assert final_state.messages[-2].get("tool_calls") is not None
+            assert final_state.messages[-1]["role"] == "tool"
+
+    asyncio.run(run())
