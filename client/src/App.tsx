@@ -6,8 +6,8 @@ import type { GridApi } from "ag-grid-community";
 import "ag-grid-community/styles/ag-grid.css";
 import "ag-grid-community/styles/ag-theme-quartz.css";
 
-import type { CellFormat, Diff, Plan, SchemaCol, TableData } from "./types";
-import { applyPlan, applyProjectPlan, inferSchema } from "./engine";
+import type { CellFormat, Diff, Plan, PreviewRecord, SchemaCol, TableData } from "./types";
+import { applyProjectPlan, inferSchema } from "./engine";
 import {
   exportProjectToExcel,
   executePlanOnServer,
@@ -15,15 +15,34 @@ import {
   fetchConfig,
   fetchSampleTables,
   fetchSampleTablesWithRetry,
-  fetchChatHistory,
+  requestAgentProjectPlan,
   requestPlan,
-  requestProjectPlan,
-  requestProjectPlanById,
   splitApiErrorDetail,
   uploadProjectFile
 } from "./llm";
 import type { ChatMessage, ConfigResponse, ModelOption } from "./llm";
 import { generateTraceId, getSessionId, logError, logInfo } from "./logger";
+import {
+  debouncedSaveBackendSessionChat,
+  flushDebouncedBackendSessionChatSave,
+  loadBackendSessionChat
+} from "./backendSessionChatStorage";
+import {
+  loadModelPreference,
+  resolveModelPreference,
+  saveModelPreference,
+} from "./modelPreferenceStorage";
+import {
+  BUILTIN_SAMPLE_WORKSPACE_KEY,
+  debouncedSaveWorkspaceHistory,
+  flushDebouncedWorkspaceHistorySave,
+  formatModelTag,
+  hashFileToWorkspaceKey,
+  loadWorkspaceHistory,
+  workspaceHistoryHasContent
+} from "./workspaceHistoryStorage";
+
+const initialModelPreference = loadModelPreference();
 
 type ConversationEntry = {
   id: number;
@@ -34,6 +53,7 @@ type ConversationEntry = {
   createdAt: string;
   modelSource: "cloud" | "local";
   modelId: string | null;
+  modelTag?: string;
 };
 
 /** Excel 风格列名：0→A, 1→B, …, 26→AA */
@@ -151,7 +171,8 @@ function schemaToColDefs(
   activeTable: string,
   cellFormats: Record<string, CellFormat>,
   onRenameColumn: (oldKey: string, newKey: string) => void,
-  diff: Diff | null
+  diff: Diff | null,
+  gridEditable: boolean
 ): ColDef[] {
   const dataCols: ColDef[] = schema.map((c) => {
     const isAdded = !!diff && diff.addedColumns.includes(c.key);
@@ -168,14 +189,16 @@ function schemaToColDefs(
     return {
       field: c.key,
       headerName: c.key,
-      editable: true,
+      editable: gridEditable,
       flex: 1,
       minWidth: 140,
-      headerComponent: EditableHeader,
-      headerComponentParams: {
-        displayName: c.key,
-        onSave: (newKey: string) => onRenameColumn(c.key, newKey)
-      },
+      headerComponent: gridEditable ? EditableHeader : undefined,
+      headerComponentParams: gridEditable
+        ? {
+            displayName: c.key,
+            onSave: (newKey: string) => onRenameColumn(c.key, newKey)
+          }
+        : undefined,
       headerClass,
       cellClass: () => {
         const classes: string[] = [];
@@ -213,12 +236,21 @@ export default function App() {
   const [plan, setPlan] = useState<Plan | null>(null);
   const [diff, setDiff] = useState<Diff | null>(null);
   const [newTablesPreview, setNewTablesPreview] = useState<string[]>([]);
+  const [agentPreviewHistory, setAgentPreviewHistory] = useState<PreviewRecord[]>([]);
+  const [pendingServerPreviewId, setPendingServerPreviewId] = useState<string | null>(null);
+  const [agentRevisionCount, setAgentRevisionCount] = useState(0);
+  const [appliedPlansSummary, setAppliedPlansSummary] = useState("");
   const [prompt, setPrompt] = useState("");
-  const [modelSource, setModelSource] = useState<"cloud" | "local">("cloud");
+  const [modelSource, setModelSource] = useState<"cloud" | "local">(
+    initialModelPreference?.modelSource ?? "cloud"
+  );
   const [modelOptions, setModelOptions] = useState<ConfigResponse | null>(null);
-  const [cloudModelId, setCloudModelId] = useState<string>("");
-  const [localModelId, setLocalModelId] = useState<string>("");
-  const [schemaExpanded, setSchemaExpanded] = useState(false);
+  const [cloudModelId, setCloudModelId] = useState<string>(
+    initialModelPreference?.cloudModelId ?? ""
+  );
+  const [localModelId, setLocalModelId] = useState<string>(
+    initialModelPreference?.localModelId ?? ""
+  );
   const [status, setStatus] = useState<string>("Ready");
   const [aiPanelCollapsed, setAiPanelCollapsed] = useState(false);
   const [cellFormats, setCellFormats] = useState<Record<string, CellFormat>>({});
@@ -234,8 +266,9 @@ export default function App() {
   const [expandedDiffIds, setExpandedDiffIds] = useState<Set<number>>(
     () => new Set()
   );
-  const [diffExpanded, setDiffExpanded] = useState(false);
-  const [activeAiTab, setActiveAiTab] = useState<"chat" | "history">("chat");
+  const [activeAiTab, setActiveAiTab] = useState<"chat" | "history" | "schema">(
+    "chat"
+  );
   const [projectId, setProjectId] = useState<string | null>(null);
   const [loadSampleLoading, setLoadSampleLoading] = useState(true);
   const [loadSampleError, setLoadSampleError] = useState<string | null>(null);
@@ -245,9 +278,21 @@ export default function App() {
   const [importError, setImportError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
-  const [chatHistoryError, setChatHistoryError] = useState<string | null>(null);
+  const [activeWorkspaceKey, setActiveWorkspaceKey] = useState<string | null>(null);
+  const [serverBootId, setServerBootId] = useState<string | null>(null);
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
+  const skipWorkspaceSaveRef = useRef(false);
+  const skipChatSaveRef = useRef(false);
   const diffPreviewLoggedRef = useRef(false);
+  const lastAgentPlanPromptRef = useRef("");
+  const agentLlmAbortRef = useRef<AbortController | null>(null);
+
+  const takeAgentLlmAbortSignal = () => {
+    agentLlmAbortRef.current?.abort();
+    const c = new AbortController();
+    agentLlmAbortRef.current = c;
+    return c.signal;
+  };
 
   useEffect(() => {
     logInfo("app_open", {
@@ -256,6 +301,45 @@ export default function App() {
       language: typeof navigator !== "undefined" ? navigator.language : ""
     });
   }, []);
+
+  const resolveModelLabel = useCallback(
+    (source: "cloud" | "local", modelId: string | null): string | undefined => {
+      if (!modelId || !modelOptions) return undefined;
+      const list =
+        source === "cloud" ? modelOptions.openRouterModels : modelOptions.ollamaModels;
+      return list.find((m) => m.id === modelId)?.label;
+    },
+    [modelOptions]
+  );
+
+  const buildModelTag = useCallback(
+    (source: "cloud" | "local", modelId: string | null): string =>
+      formatModelTag(source, modelId, resolveModelLabel(source, modelId)),
+    [resolveModelLabel]
+  );
+
+  const hydrateWorkspaceChat = useCallback(
+    (workspaceKey: string, bootId: string | null) => {
+      const cached = loadWorkspaceHistory(workspaceKey);
+      skipWorkspaceSaveRef.current = true;
+      skipChatSaveRef.current = true;
+      setConversations((cached?.conversations ?? []) as ConversationEntry[]);
+      setChatMessages(
+        bootId ? loadBackendSessionChat(bootId, workspaceKey) : []
+      );
+    },
+    []
+  );
+
+  const activateWorkspace = useCallback(
+    (workspaceKey: string) => {
+      flushDebouncedBackendSessionChatSave();
+      flushDebouncedWorkspaceHistorySave();
+      setActiveWorkspaceKey(workspaceKey);
+      hydrateWorkspaceChat(workspaceKey, serverBootId);
+    },
+    [hydrateWorkspaceChat, serverBootId]
+  );
 
   const loadSampleTables = useCallback(async () => {
     logInfo("sample_load_manual", { sessionId: getSessionId() });
@@ -274,6 +358,7 @@ export default function App() {
       });
       setProjectId(res.projectId);
       setActiveTable(loaded[0].name);
+      activateWorkspace(BUILTIN_SAMPLE_WORKSPACE_KEY);
       setStatus("已从 test-data/sample.xlsx 加载示例数据");
       logInfo("sample_load_manual_success", {
         projectId: res.projectId,
@@ -287,10 +372,29 @@ export default function App() {
     } finally {
       setLoadSampleLoading(false);
     }
-  }, []);
+  }, [activateWorkspace]);
 
   const tableNames = Object.keys(tables);
   const currentTable = tables[activeTable];
+
+  const planPreview = useMemo(() => {
+    if (!plan) return null;
+    return applyProjectPlan(tables, plan);
+  }, [plan, tables]);
+
+  const displayTables = planPreview?.tables ?? tables;
+  const displayTableNames = Object.keys(displayTables);
+  const isPreviewMode = plan != null;
+  const currentDisplayTable = displayTables[activeTable];
+
+  useEffect(() => {
+    if (!plan || !planPreview) return;
+    if (displayTables[activeTable]) return;
+    const fallback =
+      planPreview.newTables.find((n) => displayTables[n]) ?? displayTableNames[0];
+    if (fallback) setActiveTable(fallback);
+  }, [plan, planPreview, activeTable, displayTables, displayTableNames]);
+
   const onRenameColumn = useCallback((oldKey: string, newKey: string) => {
     if (!currentTable || newKey.trim() === "" || newKey === oldKey) return;
     const { schema, rows } = currentTable;
@@ -317,10 +421,17 @@ export default function App() {
 
   const colDefs = useMemo(
     () =>
-      currentTable
-        ? schemaToColDefs(currentTable.schema, activeTable, cellFormats, onRenameColumn, diff)
+      currentDisplayTable
+        ? schemaToColDefs(
+            currentDisplayTable.schema,
+            activeTable,
+            cellFormats,
+            onRenameColumn,
+            diff,
+            !isPreviewMode
+          )
         : [],
-    [currentTable, activeTable, cellFormats, onRenameColumn, diff]
+    [currentDisplayTable, activeTable, cellFormats, onRenameColumn, diff, isPreviewMode]
   );
 
   const refreshCells = useCallback(() => {
@@ -362,6 +473,7 @@ export default function App() {
       setImportError(null);
       setStatus("正在导入文件…（若超过 20 秒仍未完成，请检查文件大小或后端日志）");
       try {
+        const workspaceKey = await hashFileToWorkspaceKey(file);
         const res = await uploadProjectFile(file);
         const loaded = res.tables;
         if (!loaded || loaded.length === 0) {
@@ -382,6 +494,7 @@ export default function App() {
           setDiff(null);
           setNewTablesPreview([]);
           setCellFormats({});
+          activateWorkspace(workspaceKey);
           setStatus(`已从上传文件导入 ${loaded.length} 张表`);
           logInfo("import_file_success", {
             projectId: res.projectId,
@@ -399,7 +512,7 @@ export default function App() {
         e.target.value = "";
       }
     },
-    [setTables]
+    [activateWorkspace]
   );
 
   // 启动时从后端 test-data/sample.xlsx 加载示例表格，带重试以应对后端尚未就绪。
@@ -424,6 +537,7 @@ export default function App() {
         });
         setProjectId(res.projectId);
         setActiveTable(loaded[0].name);
+        activateWorkspace(BUILTIN_SAMPLE_WORKSPACE_KEY);
         setStatus("已从 test-data/sample.xlsx 加载示例数据");
         logInfo("sample_load_auto", {
           success: true,
@@ -444,36 +558,43 @@ export default function App() {
         setLoadSampleLoading(false);
       }
     })();
-  }, []);
+  }, [activateWorkspace]);
 
   useEffect(() => {
-    if (loadSampleLoading || importLoading) {
+    if (!serverBootId || !activeWorkspaceKey) {
       return;
     }
-    let cancelled = false;
-    (async () => {
-      try {
-        const historyMessages = await fetchChatHistory({
-          projectId: projectId ?? undefined,
-          limit: 200
-        });
-        if (cancelled) {
-          return;
-        }
-        setChatMessages(historyMessages);
-        setChatHistoryError(null);
-      } catch (e) {
-        if (cancelled) {
-          return;
-        }
-        const msg = (e as Error)?.message ?? String(e);
-        setChatHistoryError(msg);
-      }
-    })();
+    skipChatSaveRef.current = true;
+    setChatMessages(loadBackendSessionChat(serverBootId, activeWorkspaceKey));
+  }, [serverBootId, activeWorkspaceKey]);
+
+  useEffect(() => {
+    if (!activeWorkspaceKey) {
+      return;
+    }
+    if (skipWorkspaceSaveRef.current) {
+      skipWorkspaceSaveRef.current = false;
+      return;
+    }
+    debouncedSaveWorkspaceHistory(activeWorkspaceKey, { conversations });
     return () => {
-      cancelled = true;
+      flushDebouncedWorkspaceHistorySave();
     };
-  }, [projectId, loadSampleLoading, importLoading]);
+  }, [activeWorkspaceKey, conversations]);
+
+  useEffect(() => {
+    if (!activeWorkspaceKey || !serverBootId) {
+      return;
+    }
+    if (skipChatSaveRef.current) {
+      skipChatSaveRef.current = false;
+      return;
+    }
+    debouncedSaveBackendSessionChat(serverBootId, activeWorkspaceKey, chatMessages);
+    return () => {
+      flushDebouncedBackendSessionChatSave();
+    };
+  }, [activeWorkspaceKey, serverBootId, chatMessages]);
 
   const toggleResponseExpanded = useCallback((id: number) => {
     setExpandedResponseIds((prev) => {
@@ -487,11 +608,14 @@ export default function App() {
   useEffect(() => {
     fetchConfig()
       .then((c) => {
+        if (c.serverBootId) {
+          setServerBootId(c.serverBootId);
+        }
         setModelOptions(c);
-        if (c.openRouterModels.length > 0)
-          setCloudModelId((prev) => prev || c.openRouterModel || c.openRouterModels[0]!.id);
-        if (c.ollamaModels.length > 0)
-          setLocalModelId((prev) => prev || c.ollamaModel || c.ollamaModels[0]!.id);
+        const resolved = resolveModelPreference(loadModelPreference(), c);
+        setModelSource(resolved.modelSource);
+        setCloudModelId(resolved.cloudModelId);
+        setLocalModelId(resolved.localModelId);
       })
       .catch(() => setModelOptions(null));
   }, []);
@@ -515,6 +639,11 @@ export default function App() {
       setLocalModelId(modelOptions.ollamaModel || modelOptions.ollamaModels[0]!.id);
   }, [modelOptions]);
 
+  useEffect(() => {
+    if (!modelOptions || !cloudModelId || !localModelId) return;
+    saveModelPreference({ modelSource, cloudModelId, localModelId });
+  }, [modelOptions, modelSource, cloudModelId, localModelId]);
+
   const isProjectMode = tableNames.length > 1;
 
   useEffect(() => {
@@ -522,7 +651,11 @@ export default function App() {
       const isCmdK = (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k";
       if (isCmdK) {
         e.preventDefault();
-        promptRef.current?.focus();
+        setAiPanelCollapsed(false);
+        setActiveAiTab("chat");
+        queueMicrotask(() => {
+          promptRef.current?.focus();
+        });
         logInfo("cmdk_open", {
           promptLength: promptRef.current?.value.length ?? 0,
           isProjectMode
@@ -549,6 +682,13 @@ export default function App() {
       modifiedColumnsCount: diff?.modifiedColumns?.length ?? 0
     });
   }, [diff, newTablesPreview]);
+
+  function chatMessagesToAgentHistory(): { role: "user" | "assistant"; content: string }[] {
+    return chatMessages
+      .filter((m) => m.role === "user" || m.role === "assistant")
+      .slice(-24)
+      .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }));
+  }
 
   function summarizePlanForChat(p: Plan | null): string {
     if (!p) return "";
@@ -609,41 +749,55 @@ export default function App() {
     return lines.join("\n");
   }
 
+  function appendToAppliedPlansSummary(plan: Plan, promptText?: string) {
+    const entry = summarizePlanForChat(plan);
+    if (!entry.trim()) return;
+    const block = promptText?.trim()
+      ? `Prompt: ${promptText.trim()}\n${entry}`
+      : entry;
+    setAppliedPlansSummary((prev) => {
+      const parts = prev ? prev.split("\n---\n").filter(Boolean) : [];
+      parts.push(block);
+      return parts.slice(-3).join("\n---\n");
+    });
+  }
+
   function appendChatMessagesFromPlan(promptText: string, nextPlan: Plan | null) {
     if (!promptText) {
       return;
     }
-    const baseSessionId = projectId ?? "default";
+    const chatSessionId = serverBootId ?? "unknown";
     const now = new Date();
+    const activeModelId = modelSource === "cloud" ? cloudModelId : localModelId;
+    const modelTag = buildModelTag(modelSource, activeModelId);
+    const messageMeta = {
+      modelSource,
+      modelId: activeModelId,
+      modelTag
+    };
     const userMessage: ChatMessage = {
-      id: `live-${baseSessionId}-${now.getTime()}-user`,
-      sessionId: baseSessionId,
+      id: `live-${chatSessionId}-${now.getTime()}-user`,
+      sessionId: chatSessionId,
       role: "user",
       content: promptText,
       createdAt: now.toISOString(),
       projectId: projectId ?? undefined,
       source: "live",
-      meta: {
-        modelSource,
-        modelId: modelSource === "cloud" ? cloudModelId : localModelId
-      }
+      meta: messageMeta
     };
     const assistantContent =
       nextPlan && nextPlan.steps?.length
         ? summarizePlanForChat(nextPlan)
         : "已生成 Plan，但内容为空或无法摘要。";
     const assistantMessage: ChatMessage = {
-      id: `live-${baseSessionId}-${now.getTime()}-assistant`,
-      sessionId: baseSessionId,
+      id: `live-${chatSessionId}-${now.getTime()}-assistant`,
+      sessionId: chatSessionId,
       role: "assistant",
       content: assistantContent,
       createdAt: new Date(now.getTime() + 1).toISOString(),
       projectId: projectId ?? undefined,
       source: "live",
-      meta: {
-        modelSource,
-        modelId: modelSource === "cloud" ? cloudModelId : localModelId
-      }
+      meta: messageMeta
     };
     setChatMessages((prev) => [...prev, userMessage, assistantMessage]);
   }
@@ -669,68 +823,132 @@ export default function App() {
       if (isProjectMode) {
         const tablesArr = Object.values(tables);
         const usingProjectApi = !!projectId;
-        const requestPayload = usingProjectApi
-          ? {
-              prompt,
-              projectId,
-              modelSource,
-              cloudModelId: modelSource === "cloud" ? cloudModelId : undefined,
-              localModelId: modelSource === "local" ? localModelId : undefined
-            }
-          : {
-              prompt,
-              tables: tablesArr.map((t) => ({
-                name: t.name,
-                schema: t.schema,
-                sampleRows: t.rows.slice(0, 10)
-              })),
-              modelSource,
-              cloudModelId: modelSource === "cloud" ? cloudModelId : undefined,
-              localModelId: modelSource === "local" ? localModelId : undefined
-            };
-        const nextPlan = usingProjectApi
-          ? await requestProjectPlanById({
-              projectId: projectId!,
-              prompt,
-              modelSource,
-              cloudModelId: modelSource === "cloud" ? cloudModelId : undefined,
-              localModelId: modelSource === "local" ? localModelId : undefined,
-              traceId
-            })
-          : await requestProjectPlan({
-              prompt,
-              tables: tablesArr,
-              modelSource,
-              cloudModelId: modelSource === "cloud" ? cloudModelId : undefined,
-              localModelId: modelSource === "local" ? localModelId : undefined,
-              traceId
-            });
-        setPlan(nextPlan);
-        logInfo("plan_response", {
+        setAgentPreviewHistory([]);
+        setAgentRevisionCount(0);
+        setPendingServerPreviewId(null);
+        lastAgentPlanPromptRef.current = prompt;
+        const requestPayload = {
+          mode: "agent_preview" as const,
+          prompt,
+          projectId: usingProjectApi ? projectId : undefined,
+          tablesSample: tablesArr.map((t) => ({
+            name: t.name,
+            sampleRows: t.rows.slice(0, 10)
+          })),
+          modelSource,
+          cloudModelId: modelSource === "cloud" ? cloudModelId : undefined,
+          localModelId: modelSource === "local" ? localModelId : undefined
+        };
+        const agentRes = await requestAgentProjectPlan({
+          prompt,
+          tables: tablesArr,
+          modelSource,
+          cloudModelId: modelSource === "cloud" ? cloudModelId : undefined,
+          localModelId: modelSource === "local" ? localModelId : undefined,
           traceId,
-          success: true,
-          stepsCount: nextPlan.steps.length,
-          mode: usingProjectApi ? "project_id" : "project_tables"
+          history: chatMessagesToAgentHistory(),
+          appliedPlansSummary,
+          previewLifecycle: true,
+          projectId: usingProjectApi ? projectId : undefined,
+          previewTables: usingProjectApi ? undefined : tablesArr,
+          previewHistory: agentPreviewHistory,
+          revisionCount: agentRevisionCount,
+          signal: takeAgentLlmAbortSignal()
         });
-        const preview = applyProjectPlan(tables, nextPlan);
-        setDiff(preview.diff);
-        setNewTablesPreview(preview.newTables);
-        appendChatMessagesFromPlan(prompt, nextPlan);
-        setConversations((prev) => {
-          const nextId = (prev[0]?.id ?? 0) + 1;
-          const entry: ConversationEntry = {
-            id: nextId,
-            prompt,
-            payload: requestPayload,
-            plan: nextPlan,
-            diff: preview.diff,
-            createdAt: new Date().toLocaleString(),
-            modelSource,
-            modelId: modelSource === "cloud" ? cloudModelId : localModelId
-          };
-          return [entry, ...prev];
-        });
-        setStatus("Plan generated. Review Diff, then Apply.");
+        if (agentRes.kind === "clarification") {
+          setPlan(null);
+          setDiff(null);
+          setNewTablesPreview([]);
+          setPendingServerPreviewId(null);
+          setStatus(
+            `需要澄清：${agentRes.clarification.question}` +
+              (agentRes.clarification.options?.length
+                ? ` 选项：${agentRes.clarification.options.join(" / ")}`
+                : "")
+          );
+          logInfo("plan_response", {
+            traceId,
+            success: true,
+            stepsCount: 0,
+            mode: "agent_clarification"
+          });
+          return;
+        }
+        if (agentRes.kind === "plan") {
+          const nextPlan = agentRes.plan;
+          setPendingServerPreviewId(null);
+          setPlan(nextPlan);
+          logInfo("plan_response", {
+            traceId,
+            success: true,
+            stepsCount: nextPlan.steps.length,
+            mode: usingProjectApi ? "project_id_agent" : "project_tables_agent"
+          });
+          const preview = applyProjectPlan(tables, nextPlan);
+          setDiff(preview.diff);
+          setNewTablesPreview(preview.newTables);
+          appendChatMessagesFromPlan(prompt, nextPlan);
+          setConversations((prev) => {
+            const nextId = (prev[0]?.id ?? 0) + 1;
+            const activeModelId = modelSource === "cloud" ? cloudModelId : localModelId;
+            const entry: ConversationEntry = {
+              id: nextId,
+              prompt,
+              payload: requestPayload,
+              plan: nextPlan,
+              diff: preview.diff,
+              createdAt: new Date().toLocaleString(),
+              modelSource,
+              modelId: activeModelId,
+              modelTag: buildModelTag(modelSource, activeModelId)
+            };
+            return [entry, ...prev];
+          });
+          setStatus("Plan generated. Review Diff, then Apply.");
+          return;
+        }
+        if (agentRes.kind === "preview_ready") {
+          const nextPlan = agentRes.plan;
+          const localPreview = applyProjectPlan(tables, nextPlan);
+          setPlan(nextPlan);
+          setDiff(agentRes.preview.diff ?? localPreview.diff);
+          setNewTablesPreview(
+            agentRes.preview.newTables.length > 0
+              ? agentRes.preview.newTables
+              : localPreview.newTables
+          );
+          setAgentPreviewHistory(agentRes.previewHistory);
+          setPendingServerPreviewId(agentRes.preview.id);
+          const st = agentRes.state;
+          const rc = Number(st.revision_count ?? st.revisionCount ?? 0);
+          setAgentRevisionCount(Number.isFinite(rc) ? rc : 0);
+          logInfo("plan_response", {
+            traceId,
+            success: true,
+            stepsCount: nextPlan.steps.length,
+            mode: "agent_preview_ready"
+          });
+          appendChatMessagesFromPlan(prompt, nextPlan);
+          setConversations((prev) => {
+            const nextId = (prev[0]?.id ?? 0) + 1;
+            const activeModelId = modelSource === "cloud" ? cloudModelId : localModelId;
+            const entry: ConversationEntry = {
+              id: nextId,
+              prompt,
+              payload: requestPayload,
+              plan: nextPlan,
+              diff: agentRes.preview.diff,
+              createdAt: new Date().toLocaleString(),
+              modelSource,
+              modelId: activeModelId,
+              modelTag: buildModelTag(modelSource, activeModelId)
+            };
+            return [entry, ...prev];
+          });
+          setStatus("服务器预览已就绪：Apply 写回、Abort 放弃预览，或输入修订说明后点 Revise。");
+          return;
+        }
+        setStatus("Unexpected agent response.");
       } else {
         const t = Object.values(tables)[0]!;
         const requestPayload = {
@@ -757,12 +975,13 @@ export default function App() {
           stepsCount: nextPlan.steps.length,
           mode: "single_table"
         });
-        const preview = applyPlan(t.rows, t.schema, nextPlan);
+        const preview = applyProjectPlan(tables, nextPlan);
         setDiff(preview.diff);
-        setNewTablesPreview([]);
+        setNewTablesPreview(preview.newTables);
         appendChatMessagesFromPlan(prompt, nextPlan);
         setConversations((prev) => {
           const nextId = (prev[0]?.id ?? 0) + 1;
+          const activeModelId = modelSource === "cloud" ? cloudModelId : localModelId;
           const entry: ConversationEntry = {
             id: nextId,
             prompt,
@@ -771,7 +990,8 @@ export default function App() {
             diff: preview.diff,
             createdAt: new Date().toLocaleString(),
             modelSource,
-            modelId: modelSource === "cloud" ? cloudModelId : localModelId
+            modelId: activeModelId,
+            modelTag: buildModelTag(modelSource, activeModelId)
           };
           return [entry, ...prev];
         });
@@ -808,12 +1028,59 @@ export default function App() {
       traceId,
       stepsCount: plan.steps.length,
       useProjectApi: !!projectId && isProjectMode,
-      projectId: projectId ?? undefined
+      projectId: projectId ?? undefined,
+      serverPreview: !!pendingServerPreviewId
     });
     setHistory((h) => [...h, clone(tables)]);
 
     (async () => {
       try {
+        if (pendingServerPreviewId && isProjectMode) {
+          const tablesArr = Object.values(tables);
+          const usingProjectApi = !!projectId;
+          const res = await requestAgentProjectPlan({
+            prompt: lastAgentPlanPromptRef.current || prompt,
+            tables: tablesArr,
+            modelSource,
+            cloudModelId: modelSource === "cloud" ? cloudModelId : undefined,
+            localModelId: modelSource === "local" ? localModelId : undefined,
+            traceId,
+            history: chatMessagesToAgentHistory(),
+            appliedPlansSummary,
+            previewLifecycle: true,
+            projectId: usingProjectApi ? projectId : undefined,
+            previewTables: usingProjectApi ? undefined : tablesArr,
+            previewHistory: agentPreviewHistory,
+            revisionCount: agentRevisionCount,
+            previewDecision: "confirm",
+            previewId: pendingServerPreviewId,
+            commitPlan: plan,
+            signal: takeAgentLlmAbortSignal()
+          });
+          if (res.kind !== "committed") {
+            setStatus("确认失败：服务器未返回 committed。");
+            return;
+          }
+          appendToAppliedPlansSummary(plan, lastAgentPlanPromptRef.current || prompt);
+          setTables(res.executeResult.tables);
+          if (res.executeResult.newTables.length > 0) {
+            setActiveTable(res.executeResult.newTables[0]!);
+          }
+          setAgentPreviewHistory(res.previewHistory);
+          setPendingServerPreviewId(null);
+          setPlan(null);
+          setDiff(null);
+          setNewTablesPreview([]);
+          setPrompt("");
+          setStatus("已通过服务器预览确认并写回。");
+          logInfo("plan_apply_success", {
+            traceId,
+            newTablesCount: res.executeResult.newTables.length,
+            mode: "server_preview_confirm"
+          });
+          return;
+        }
+
         const useProjectApi = !!projectId && isProjectMode;
         const result = useProjectApi
           ? await executeProjectPlanById({
@@ -822,6 +1089,7 @@ export default function App() {
               traceId
             })
           : await executePlanOnServer({ tables, plan, traceId });
+        appendToAppliedPlansSummary(plan, lastAgentPlanPromptRef.current || prompt);
         setTables(result.tables);
         if (result.newTables.length > 0) {
           setActiveTable(result.newTables[0]);
@@ -829,7 +1097,7 @@ export default function App() {
         setStatus("Applied by backend.");
         setPrompt("");
         setPlan(null);
-        setDiff((prev) => result.diff ?? prev);
+        setDiff(null);
         setNewTablesPreview([]);
         logInfo("plan_apply_success", {
           traceId,
@@ -841,6 +1109,120 @@ export default function App() {
         logError("plan_apply_error", { traceId, message: em });
       }
     })();
+  }
+
+  async function onAbortServerPreview() {
+    if (!pendingServerPreviewId) return;
+    const traceId = generateTraceId();
+    try {
+      const tablesArr = Object.values(tables);
+      const usingProjectApi = !!projectId;
+      const res = await requestAgentProjectPlan({
+        prompt: lastAgentPlanPromptRef.current || prompt,
+        tables: tablesArr,
+        modelSource,
+        cloudModelId: modelSource === "cloud" ? cloudModelId : undefined,
+        localModelId: modelSource === "local" ? localModelId : undefined,
+        traceId,
+        history: chatMessagesToAgentHistory(),
+        appliedPlansSummary,
+        previewLifecycle: true,
+        projectId: usingProjectApi ? projectId : undefined,
+        previewTables: usingProjectApi ? undefined : tablesArr,
+        previewHistory: agentPreviewHistory,
+        revisionCount: agentRevisionCount,
+        previewDecision: "abort",
+        previewId: pendingServerPreviewId,
+        signal: takeAgentLlmAbortSignal()
+      });
+      if (res.kind !== "preview_aborted") {
+        setStatus("Abort 失败：响应异常。");
+        return;
+      }
+      setAgentPreviewHistory(res.previewHistory);
+      setPendingServerPreviewId(null);
+      setPlan(null);
+      setDiff(null);
+      setNewTablesPreview([]);
+      setStatus("已放弃预览，表格未修改；记录保留在历史中。");
+      logInfo("preview_abort", { traceId });
+    } catch (e: unknown) {
+      const em = String((e as Error)?.message ?? e);
+      setStatus("Abort failed: " + em);
+      logError("preview_abort_error", { traceId, message: em });
+    }
+  }
+
+  async function onReviseServerPreview() {
+    if (!pendingServerPreviewId) return;
+    const extra = prompt.trim();
+    if (!extra) {
+      setStatus("请先在输入框中填写修订说明，再点 Revise。");
+      return;
+    }
+    const traceId = generateTraceId();
+    setStatus(modelSource === "cloud" ? "Calling cloud LLM…" : "Calling local LLM…");
+    try {
+      const tablesArr = Object.values(tables);
+      const usingProjectApi = !!projectId;
+      const agentRes = await requestAgentProjectPlan({
+        prompt: lastAgentPlanPromptRef.current || prompt,
+        tables: tablesArr,
+        modelSource,
+        cloudModelId: modelSource === "cloud" ? cloudModelId : undefined,
+        localModelId: modelSource === "local" ? localModelId : undefined,
+        traceId,
+        history: chatMessagesToAgentHistory(),
+        appliedPlansSummary,
+        previewLifecycle: true,
+        projectId: usingProjectApi ? projectId : undefined,
+        previewTables: usingProjectApi ? undefined : tablesArr,
+        previewHistory: agentPreviewHistory,
+        revisionCount: agentRevisionCount,
+        previewDecision: "revise",
+        previewId: pendingServerPreviewId,
+        revisionMessage: extra,
+        signal: takeAgentLlmAbortSignal()
+      });
+      if (agentRes.kind === "preview_ready") {
+        const nextPlan = agentRes.plan;
+        const localPreview = applyProjectPlan(tables, nextPlan);
+        setPlan(nextPlan);
+        setDiff(agentRes.preview.diff ?? localPreview.diff);
+        setNewTablesPreview(
+          agentRes.preview.newTables.length > 0
+            ? agentRes.preview.newTables
+            : localPreview.newTables
+        );
+        setAgentPreviewHistory(agentRes.previewHistory);
+        setPendingServerPreviewId(agentRes.preview.id);
+        const st = agentRes.state;
+        const rc = Number(st.revision_count ?? st.revisionCount ?? 0);
+        setAgentRevisionCount(Number.isFinite(rc) ? rc : 0);
+        appendChatMessagesFromPlan(extra, agentRes.plan);
+        setStatus("已根据修订生成新的服务器预览。");
+        logInfo("preview_revise", { traceId });
+        return;
+      }
+      if (agentRes.kind === "plan") {
+        setPendingServerPreviewId(null);
+        setPlan(agentRes.plan);
+        const preview = applyProjectPlan(tables, agentRes.plan);
+        setDiff(preview.diff);
+        setNewTablesPreview(preview.newTables);
+        setStatus("修订后返回普通 Plan（无服务端预览副本），可本地 Apply。");
+        return;
+      }
+      if (agentRes.kind === "clarification") {
+        setStatus(`需要澄清：${agentRes.clarification.question}`);
+        return;
+      }
+      setStatus("修订响应异常。");
+    } catch (e: unknown) {
+      const msg = String((e as Error)?.message ?? e);
+      setStatus(statusFromErrorMessage(msg));
+      logError("preview_revise_error", { traceId, message: msg });
+    }
   }
 
   function onAddTable() {
@@ -1034,19 +1416,33 @@ export default function App() {
   return (
     <>
       <div className="header">
-        <div style={{ fontWeight: 600 }}>Cursor for Spreadsheet — 多表项目</div>
-        <div className="small">
-          <span className="kbd">Cmd</span>+<span className="kbd">K</span> 聚焦 AI 面板
+        <div style={{ fontWeight: 600, display: "flex", alignItems: "center" }}>
+          <i className="bi bi-table header-title-icon" aria-hidden="true" />
+          Cursor for Spreadsheet — 多表项目
         </div>
-        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }} className="small">
-          {loadSampleLoading && <span>正在加载示例…</span>}
+        <div className="small" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <span>
+            <span className="kbd">Cmd</span>+<span className="kbd">K</span> 聚焦 AI 面板
+          </span>
+        </div>
+        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }} className="small header-status-cluster">
+          {loadSampleLoading && (
+            <span style={{ display: "flex", alignItems: "center", gap: 6 }} aria-live="polite">
+              <i
+                className="bi bi-arrow-repeat bi-spin header-status-icon"
+                aria-hidden="true"
+              />
+              正在加载示例…
+            </span>
+          )}
           {loadSampleError && !loadSampleLoading && (
             <button
               type="button"
-              className="btn"
+              className="btn header-inline-btn"
               onClick={loadSampleTables}
               title={loadSampleError}
             >
+              <i className="bi bi-folder2-open" aria-hidden="true" />
               加载示例
             </button>
           )}
@@ -1057,10 +1453,10 @@ export default function App() {
       <div className="toolbar">
         <div className="toolbar-group">
           <button type="button" className="toolbar-btn" title="撤销" onClick={onUndo} disabled={history.length === 0}>
-            ↩
+            <i className="bi bi-arrow-counterclockwise" aria-hidden="true" />
           </button>
           <button type="button" className="toolbar-btn" title="重做" disabled>
-            ↪
+            <i className="bi bi-arrow-clockwise" aria-hidden="true" />
           </button>
         </div>
         <div className="toolbar-divider" />
@@ -1092,66 +1488,44 @@ export default function App() {
         <div className="toolbar-divider" />
         <div className="toolbar-group">
           <button type="button" className="toolbar-btn" title="粗体" onClick={onToolbarBold}>
-            <strong>B</strong>
+            <i className="bi bi-type-bold" aria-hidden="true" />
           </button>
           <button type="button" className="toolbar-btn" title="斜体" onClick={onToolbarItalic}>
-            <em>I</em>
+            <i className="bi bi-type-italic" aria-hidden="true" />
           </button>
           <button type="button" className="toolbar-btn" title="下划线" onClick={onToolbarUnderline}>
-            U
+            <i className="bi bi-type-underline" aria-hidden="true" />
           </button>
         </div>
         <div className="toolbar-divider" />
         <div className="toolbar-group">
           <button type="button" className="toolbar-btn toolbar-btn-icon" title="左对齐" onClick={() => onToolbarAlign("left")}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-              <line x1="4" y1="6" x2="20" y2="6" />
-              <line x1="4" y1="12" x2="16" y2="12" />
-              <line x1="4" y1="18" x2="14" y2="18" />
-            </svg>
+            <i className="bi bi-text-left" aria-hidden="true" />
           </button>
           <button type="button" className="toolbar-btn toolbar-btn-icon" title="居中" onClick={() => onToolbarAlign("center")}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-              <line x1="4" y1="6" x2="20" y2="6" />
-              <line x1="8" y1="12" x2="16" y2="12" />
-              <line x1="6" y1="18" x2="18" y2="18" />
-            </svg>
+            <i className="bi bi-text-center" aria-hidden="true" />
           </button>
           <button type="button" className="toolbar-btn toolbar-btn-icon" title="右对齐" onClick={() => onToolbarAlign("right")}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-              <line x1="4" y1="6" x2="20" y2="6" />
-              <line x1="8" y1="12" x2="20" y2="12" />
-              <line x1="10" y1="18" x2="20" y2="18" />
-            </svg>
+            <i className="bi bi-text-right" aria-hidden="true" />
           </button>
         </div>
+        {/* 填充颜色、添加行、添加列
         <div className="toolbar-divider" />
         <div className="toolbar-group">
           <button type="button" className="toolbar-btn" title="填充颜色" onClick={onToolbarBgColor}>
-            ▤
+            <i className="bi bi-palette-fill" aria-hidden="true" />
           </button>
         </div>
         <div className="toolbar-divider" />
         <div className="toolbar-group">
           <button type="button" className="toolbar-btn toolbar-btn-icon" title="添加行" onClick={onAddRow}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-              <line x1="4" y1="8" x2="14" y2="8" />
-              <line x1="4" y1="12" x2="18" y2="12" />
-              <line x1="4" y1="16" x2="12" y2="16" />
-              <line x1="20" y1="10" x2="20" y2="14" />
-              <line x1="18" y1="12" x2="22" y2="12" />
-            </svg>
+            <i className="bi bi-list-ul" aria-hidden="true" />
           </button>
           <button type="button" className="toolbar-btn toolbar-btn-icon" title="添加列" onClick={onAddColumn}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-              <line x1="8" y1="4" x2="8" y2="14" />
-              <line x1="12" y1="4" x2="12" y2="18" />
-              <line x1="16" y1="4" x2="16" y2="12" />
-              <line x1="20" y1="18" x2="20" y2="22" />
-              <line x1="18" y1="20" x2="22" y2="20" />
-            </svg>
+            <i className="bi bi-layout-sidebar-inset-reverse" aria-hidden="true" />
           </button>
         </div>
+        */}
         <div className="toolbar-group" style={{ marginLeft: "auto" }}>
           <input
             ref={fileInputRef}
@@ -1166,17 +1540,25 @@ export default function App() {
             title="导入 Excel/CSV 文件"
             onClick={onImportClick}
             disabled={importLoading}
+            aria-busy={importLoading}
           >
+            <i
+              className={`bi ${
+                importLoading ? "bi-arrow-repeat bi-spin" : "bi-file-earmark-arrow-up"
+              }`}
+              aria-hidden="true"
+            />
             {importLoading ? "导入中…" : "导入文件"}
           </button>
           <button type="button" className="toolbar-btn toolbar-btn-text" title="下载为 Excel" onClick={onDownloadExcel}>
+            <i className="bi bi-file-earmark-arrow-down" aria-hidden="true" />
             导出文件
           </button>
         </div>
       </div>
 
       <div className="tabs-row">
-        {tableNames.map((name) => (
+        {displayTableNames.map((name) => (
           <div key={name} className={`tab ${activeTable === name ? "active" : ""}`}>
             <button
               type="button"
@@ -1186,36 +1568,44 @@ export default function App() {
             >
               {name}
             </button>
-            {tableNames.length > 1 && (
+            {!isPreviewMode && tableNames.length > 1 && (
               <button
                 type="button"
                 className="tab-close"
                 onClick={() => onRemoveTable(name)}
                 title="删除表"
+                aria-label="删除表"
               >
-                ×
+                <i className="bi bi-x-lg" aria-hidden="true" />
               </button>
             )}
           </div>
         ))}
         <button type="button" className="btn tab-add" title="添加新表" onClick={onAddTable}>
-          + 新表
+          <i className="bi bi-plus-lg" aria-hidden="true" />
+          新表
         </button>
       </div>
 
       <div className="container">
         <div className="grid ag-theme-quartz">
-          {currentTable && (
+          {currentDisplayTable && (
             <AgGridReact
               key={activeTable}
-              rowData={currentTable.rows}
+              rowData={currentDisplayTable.rows}
               columnDefs={colDefs}
-              defaultColDef={{ resizable: true, sortable: true, filter: true }}
+              defaultColDef={{
+                resizable: true,
+                sortable: true,
+                filter: true,
+                editable: !isPreviewMode
+              }}
               rowSelection="multiple"
               onGridReady={(e) => {
                 gridRef.current = e.api;
               }}
               onCellValueChanged={(e) => {
+                if (isPreviewMode || !currentTable) return;
                 const idx = e.rowIndex!;
                 const next = [...currentTable.rows];
                 next[idx] = { ...next[idx], [e.colDef.field!]: e.newValue };
@@ -1227,27 +1617,27 @@ export default function App() {
 
         <div className={`side-panel ${aiPanelCollapsed ? "collapsed" : ""}`}>
           <div className="panel-content">
-          <div className="panel-section ai-panel">
-            <div style={{ fontWeight: 600, marginBottom: 8 }}>AI Edit</div>
-            <div className="ai-tabs">
-              <button
-                type="button"
-                className={`ai-tab ${activeAiTab === "chat" ? "active" : ""}`}
-                onClick={() => setActiveAiTab("chat")}
-              >
-                Chat
-              </button>
-              <button
-                type="button"
-                className={`ai-tab ${activeAiTab === "history" ? "active" : ""}`}
-                onClick={() => {
-                  logInfo("history_tab_open", {});
-                  setActiveAiTab("history");
-                }}
-              >
-                历史记录
-              </button>
-            </div>
+            {activeAiTab === "schema" ? (
+              <div className="panel-section schema-section schema-tab-panel">
+                <div style={{ fontWeight: 600, marginBottom: 8 }}>
+                  Schema {isProjectMode && currentDisplayTable ? `(${activeTable})` : ""}
+                </div>
+                {!currentDisplayTable ? (
+                  <div className="small">暂无当前表，无法展示 schema。</div>
+                ) : (
+                  <>
+                    <pre>{JSON.stringify(currentDisplayTable.schema, null, 2)}</pre>
+                    <div className="small">
+                      {isProjectMode
+                        ? "项目内所有表的 schema 和部分行数据会发送给 LLM。"
+                        : "This schema and a subset of rows are what the LLM sees."}
+                    </div>
+                  </>
+                )}
+              </div>
+            ) : (
+              <div className="panel-section ai-panel">
+                <div style={{ fontWeight: 600, marginBottom: 8 }}>AI Edit</div>
 
             {activeAiTab === "chat" && (
               <>
@@ -1256,61 +1646,10 @@ export default function App() {
                     项目模式：可对多张表进行 join / create_table 等操作
                   </div>
                 )}
-                <div className="model-switch">
-                  <div className="model-source-row">
-                    <label>
-                      <input
-                        type="radio"
-                        name="modelSource"
-                        checked={modelSource === "cloud"}
-                        onChange={() => setModelSource("cloud")}
-                      />
-                      云端
-                    </label>
-                    <label>
-                      <input
-                        type="radio"
-                        name="modelSource"
-                        checked={modelSource === "local"}
-                        onChange={() => setModelSource("local")}
-                      />
-                      本地
-                    </label>
-                  </div>
-                  {modelSource === "cloud" && modelOptions?.openRouterModels && (
-                    <select
-                      className="model-select"
-                      value={cloudModelId}
-                      onChange={(e) => setCloudModelId(e.target.value)}
-                      title="云端模型"
-                    >
-                      {modelOptions.openRouterModels.map((m: ModelOption) => (
-                        <option key={m.id} value={m.id}>{m.label}</option>
-                      ))}
-                    </select>
-                  )}
-                  {modelSource === "local" && modelOptions?.ollamaModels && (
-                    <select
-                      className="model-select"
-                      value={localModelId}
-                      onChange={(e) => setLocalModelId(e.target.value)}
-                      title="本地模型"
-                    >
-                      {modelOptions.ollamaModels.map((m: ModelOption) => (
-                        <option key={m.id} value={m.id}>{m.label}</option>
-                      ))}
-                    </select>
-                  )}
-                </div>
                 <div className="chat-history-container" ref={chatScrollRef}>
-                  {chatHistoryError && (
-                    <div className="small chat-history-error">
-                      历史对话加载失败：{chatHistoryError}
-                    </div>
-                  )}
-                  {!chatHistoryError && chatMessages.length === 0 && (
+                  {chatMessages.length === 0 && (
                     <div className="small chat-empty-hint">
-                      暂无历史对话，可以在下方输入指令开始与 AI 交互。
+                      暂无对话，可在下方输入指令开始与 AI 交互（仅保留本次启动后端期间的记录）。
                     </div>
                   )}
                   {chatMessages.map((msg) => (
@@ -1320,16 +1659,19 @@ export default function App() {
                     >
                       <div className="chat-bubble">
                         <div className="chat-meta small">
-                          <span className="chat-meta-role">
+                          <span className={`chat-meta-${msg.role.toLowerCase()}`}>
                             {msg.role === "user"
                               ? "你"
                               : msg.role === "assistant"
                               ? "AI"
                               : "系统"}
                           </span>
-                          <span className="chat-meta-time">
+                          <span className={`chat-meta-time chat-meta-${msg.role.toLowerCase()}`}>
                             {new Date(msg.createdAt).toLocaleString()}
                           </span>
+                          {msg.meta?.modelTag && (
+                            <span className="chat-tag">{msg.meta.modelTag}</span>
+                          )}
                           {msg.source === "history" && (
                             <span className="chat-tag">历史</span>
                           )}
@@ -1339,25 +1681,89 @@ export default function App() {
                     </div>
                   ))}
                 </div>
-                <textarea
-                  ref={promptRef}
-                  value={prompt}
-                  onChange={(e) => setPrompt(e.target.value)}
-                  placeholder={placeholder}
-                />
-
-                <div className="row">
-                  <button className="btn primary" onClick={onGenerate}>
-                    Generate Plan
-                  </button>
+                <div className="ai-prompt-dock">
+                  <div className="model-switch">
+                    <div className="model-source-row">
+                      <label>
+                        <input
+                          type="radio"
+                          name="modelSource"
+                          checked={modelSource === "cloud"}
+                          onChange={() => setModelSource("cloud")}
+                        />
+                        云端
+                      </label>
+                      <label>
+                        <input
+                          type="radio"
+                          name="modelSource"
+                          checked={modelSource === "local"}
+                          onChange={() => setModelSource("local")}
+                        />
+                        本地
+                      </label>
+                    </div>
+                    {modelSource === "cloud" && modelOptions?.openRouterModels && (
+                      <select
+                        className="model-select"
+                        value={cloudModelId}
+                        onChange={(e) => setCloudModelId(e.target.value)}
+                        title="云端模型"
+                      >
+                        {modelOptions.openRouterModels.map((m: ModelOption) => (
+                          <option key={m.id} value={m.id}>{m.label}</option>
+                        ))}
+                      </select>
+                    )}
+                    {modelSource === "local" && modelOptions?.ollamaModels && (
+                      <select
+                        className="model-select"
+                        value={localModelId}
+                        onChange={(e) => setLocalModelId(e.target.value)}
+                        title="本地模型"
+                      >
+                        {modelOptions.ollamaModels.map((m: ModelOption) => (
+                          <option key={m.id} value={m.id}>{m.label}</option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
+                  <div className="prompt-compose">
+                    <div className="prompt-input-wrap">
+                      <textarea
+                        ref={promptRef}
+                        className="prompt-textarea"
+                        value={prompt}
+                        onChange={(e) => setPrompt(e.target.value)}
+                        placeholder={placeholder}
+                      />
+                    </div>
+                    <div className="prompt-generate-row">
+                      <button
+                        type="button"
+                        className="btn primary prompt-generate-btn"
+                        onClick={onGenerate}
+                      >
+                        Generate Plan
+                      </button>
+                    </div>
+                  </div>
                 </div>
+
                 {(diff || newTablesPreview.length > 0) && (
                   <>
                     <div style={{ fontWeight: 600 }}>Diff Preview</div>
-                    {diff &&
-                      renderJsonPreview(diff, 5, diffExpanded, () =>
-                        setDiffExpanded((v) => !v)
-                      )}
+                    <div className="small" style={{ marginBottom: 8 }}>
+                      表格中为预览结果，确认后 Apply。
+                      {diff &&
+                        (diff.addedColumns.length > 0 || diff.modifiedColumns.length > 0) && (
+                          <>
+                            {" "}
+                            变更列：
+                            {[...diff.addedColumns, ...diff.modifiedColumns].join(", ")}
+                          </>
+                        )}
+                    </div>
                     {newTablesPreview.length > 0 && (
                       <div className="small">
                         将新建表: {newTablesPreview.join(", ")}
@@ -1367,7 +1773,21 @@ export default function App() {
                       <button className="btn primary" onClick={onApply}>
                         Apply
                       </button>
-                      <div className="small">Apply plan to project data.</div>
+                      {pendingServerPreviewId && (
+                        <>
+                          <button type="button" className="btn" onClick={onAbortServerPreview}>
+                            Abort
+                          </button>
+                          <button type="button" className="btn" onClick={onReviseServerPreview}>
+                            Revise
+                          </button>
+                        </>
+                      )}
+                      <div className="small">
+                        {pendingServerPreviewId
+                          ? "Apply：服务端确认写回；Abort：放弃预览不修改数据；Revise：使用上方输入框中的说明请求新计划。"
+                          : "Apply plan to project data."}
+                      </div>
                     </div>
                   </>
                 )}
@@ -1379,7 +1799,7 @@ export default function App() {
                 <div style={{ fontWeight: 600 }}>历史记录（技术视图）</div>
                 <div className="small" style={{ marginBottom: 6 }}>
                   此处用于查看每次调用 LLM 的原始 payload / plan / diff，适合调试；
-                  自然语言对话请在上方 Chat 面板查看。
+                  自然语言对话请在「AI 对话」标签中查看。
                 </div>
                 {conversations.length === 0 ? (
                   <div className="small">暂时还没有历史记录。</div>
@@ -1389,8 +1809,9 @@ export default function App() {
                       <div key={item.id} className="conversation-item">
                         <div className="conversation-header">
                           <div className="small">
-                            #{item.id} · {item.modelSource === "cloud" ? "云端" : "本地"}{" "}
-                            {item.modelId || ""}
+                            #{item.id} ·{" "}
+                            {item.modelTag ??
+                              formatModelTag(item.modelSource, item.modelId)}
                           </div>
                           <div className="small">{item.createdAt}</div>
                         </div>
@@ -1444,51 +1865,79 @@ export default function App() {
                 )}
               </div>
             )}
+              </div>
+            )}
           </div>
-
-          <div className="panel-section schema-section">
+          <div
+            className="panel-edge-tabs"
+            role="tablist"
+            aria-label="AI panel views"
+          >
             <button
               type="button"
-              className="schema-toggle"
+              role="tab"
+              aria-selected={activeAiTab === "chat"}
+              className={`panel-edge-tab ${activeAiTab === "chat" ? "active" : ""}`}
+              title="AI 对话"
+              aria-label="AI 对话"
               onClick={() => {
-                setSchemaExpanded((v) => {
+                setAiPanelCollapsed(false);
+                setActiveAiTab("chat");
+                logInfo("ai_edge_tab_select", { tab: "chat" });
+              }}
+            >
+              <i className="bi bi-chat-dots" aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeAiTab === "schema"}
+              className={`panel-edge-tab ${activeAiTab === "schema" ? "active" : ""}`}
+              title="Schema"
+              aria-label="Schema"
+              onClick={() => {
+                setAiPanelCollapsed(false);
+                setActiveAiTab("schema");
+                logInfo("ai_edge_tab_select", { tab: "schema" });
+              }}
+            >
+              <i className="bi bi-braces" aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeAiTab === "history"}
+              className={`panel-edge-tab ${activeAiTab === "history" ? "active" : ""}`}
+              title="历史对话（LLM 调用调试）"
+              aria-label="历史对话"
+              onClick={() => {
+                logInfo("history_tab_open", {});
+                setAiPanelCollapsed(false);
+                setActiveAiTab("history");
+                logInfo("ai_edge_tab_select", { tab: "history" });
+              }}
+            >
+              <i className="bi bi-clock-history" aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              className="panel-edge-tab panel-edge-tab-collapse"
+              title={aiPanelCollapsed ? "展开 AI 面板" : "折叠 AI 面板"}
+              aria-label={aiPanelCollapsed ? "展开 AI 面板" : "折叠 AI 面板"}
+              onClick={() => {
+                setAiPanelCollapsed((v) => {
                   const next = !v;
-                  logInfo("schema_toggle", { expanded: next });
+                  logInfo("ai_panel_collapse_toggle", { collapsed: next });
                   return next;
                 });
               }}
             >
-              <span className="schema-toggle-icon">
-                {schemaExpanded ? "▼" : "▶"}
-              </span>
-              Schema {isProjectMode && `(${activeTable})`}
+              <i
+                className={`bi ${aiPanelCollapsed ? "bi-chevron-left" : "bi-chevron-right"}`}
+                aria-hidden="true"
+              />
             </button>
-            {schemaExpanded && currentTable && (
-              <>
-                <pre>{JSON.stringify(currentTable.schema, null, 2)}</pre>
-                <div className="small">
-                  {isProjectMode
-                    ? "项目内所有表的 schema 和部分行数据会发送给 LLM。"
-                    : "This schema and a subset of rows are what the LLM sees."}
-                </div>
-              </>
-            )}
           </div>
-          </div>
-          <button
-            type="button"
-            className="panel-toggle"
-            onClick={() => {
-              setAiPanelCollapsed((v) => {
-                const next = !v;
-                logInfo("ai_panel_collapse_toggle", { collapsed: next });
-                return next;
-              });
-            }}
-            title={aiPanelCollapsed ? "展开 AI 面板" : "折叠 AI 面板"}
-          >
-            {aiPanelCollapsed ? "◀" : "▶"}
-          </button>
         </div>
       </div>
     </>
