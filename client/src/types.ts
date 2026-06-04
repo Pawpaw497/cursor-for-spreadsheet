@@ -168,6 +168,26 @@ export type Diff = {
   validationErrors: string[];
 };
 
+/** 与后端 ``PreviewRecord`` 对齐的 UI 子集（plan 为完整对象便于前端渲染）。 */
+export type PreviewStatus = "pending" | "aborted" | "committed" | "revised";
+
+export type PreviewDecisionKind = "confirm" | "abort" | "revise";
+
+export type PreviewRecord = {
+  id: string;
+  /** 与 ``Plan`` 对齐的结构（后端存 dict，前端解析后使用）。 */
+  plan: Plan;
+  diff: Diff;
+  newTables: string[];
+  status: PreviewStatus;
+  user_decision?: PreviewDecisionKind | null;
+  user_decision_reason?: string | null;
+  execution_error?: string | null;
+  tables_fingerprint_at_preview?: string;
+  created_at: number;
+  resolved_at?: number | null;
+};
+
 export type TableData = {
   name: string;
   rows: Record<string, any>[];
