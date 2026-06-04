@@ -1,5 +1,6 @@
 """应用配置，从环境变量加载。"""
 import os
+import uuid
 
 from dotenv import load_dotenv
 
@@ -25,11 +26,17 @@ class Settings:
         "OPENROUTER_MODELS",
         (
             "openrouter/auto,"
+            "google/gemini-2.5-flash-lite,"
+            "openai/gpt-4o-mini,"
+            "deepseek/deepseek-chat,"
             "openrouter/anthropic/claude-3.5-sonnet,"
             "openrouter/google/gemini-2.0-flash-001"
         ),
     )
-    OPENROUTER_LABELS: str = os.getenv("OPENROUTER_LABELS", "Auto,Qwen,Gemini")
+    OPENROUTER_LABELS: str = os.getenv(
+        "OPENROUTER_LABELS",
+        "Auto,Gemini Lite（经济）,GPT-4o mini（经济）,DeepSeek（经济）,Claude 3.5（标准）,Gemini 2.0 Flash（标准）",
+    )
 
     # LLM - Local (Ollama)
     AUTO_START_OLLAMA: bool = os.getenv(
@@ -49,6 +56,31 @@ class Settings:
     # Chat history / agent transcripts
     AGENT_TRANSCRIPTS_DIR: str = os.getenv("AGENT_TRANSCRIPTS_DIR", "")
 
+    # LLM debug NDJSON (empty = disabled)
+    LLM_DEBUG_LOG_DIR: str = os.getenv("LLM_DEBUG_LOG_DIR", "")
+    LLM_DEBUG_MAX_CHARS: int = int(os.getenv("LLM_DEBUG_MAX_CHARS", "50000"))
+
+    # SQLite audit log (HTTP + LLM); disabled when AUDIT_DB_ENABLED=0
+    AUDIT_DB_ENABLED: bool = os.getenv("AUDIT_DB_ENABLED", "1").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    AUDIT_DB_PATH: str = os.getenv("AUDIT_DB_PATH", "data/audit.sqlite3")
+    AUDIT_MAX_BODY_CHARS: int = int(os.getenv("AUDIT_MAX_BODY_CHARS", "50000"))
+    AUDIT_STORE_WORKSPACE_KEY: bool = os.getenv(
+        "AUDIT_STORE_WORKSPACE_KEY", "0"
+    ).lower() in ("1", "true", "yes")
+    # Reserved for memory Stage 6 (not used by audit MVP)
+    SESSION_MEMORY_DB_ENABLED: bool = os.getenv(
+        "SESSION_MEMORY_DB_ENABLED", "0"
+    ).lower() in ("1", "true", "yes")
+
+    # Agent PA: debug-only — parse assistant text as Plan JSON when structured output missing
+    AGENT_PA_PLAN_JSON_FALLBACK: bool = os.getenv(
+        "AGENT_PA_PLAN_JSON_FALLBACK", "0"
+    ).lower() in ("1", "true", "yes")
+
     @property
     def openrouter_model_list(self) -> list[tuple[str, str]]:
         return _parse_model_options(
@@ -63,3 +95,6 @@ class Settings:
 
 
 settings = Settings()
+
+# 进程级 ID：uvicorn/FastAPI 每次启动生成一次，供前端界定「本次启动后端期间」。
+SERVER_BOOT_ID: str = uuid.uuid4().hex

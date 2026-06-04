@@ -12,8 +12,21 @@ dependencies = [
     "pydantic>=2.8.0",
     "python-multipart>=0.0.9",
     "langgraph>=0.2.0",
+    "pydantic-ai>=0.2.0",
+    "sqlalchemy[asyncio]>=2.0",
+    "aiosqlite>=0.20",
 ]
 
 # Application project: only manage third-party deps; do not build/install a wheel.
 [tool.uv]
 package = false
+
+[dependency-groups]
+dev = ["pytest>=8.0"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+markers = [
+    "integration: optional tests hitting real network (e.g. cloud LLM)",
+]
