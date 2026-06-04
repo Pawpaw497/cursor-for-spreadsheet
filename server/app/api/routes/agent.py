@@ -1,7 +1,7 @@
 """Agent 路由：多轮推理 + 工具执行，支持同步与 SSE 流式输出。"""
 from __future__ import annotations
 
-from typing import AsyncIterator
+from typing import Any, AsyncIterator, Dict, Optional, cast
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
@@ -12,32 +12,262 @@ from app.agent import (
     run_agent_orchestrated,
     stream_agent_events,
 )
+from app.api.routes.plan import _http_exception_from_runtime
+from app.agent.actions import (
+    AskClarificationAction,
+    FinishAction,
+    OutputPlanAction,
+    PreviewReadyAction,
+)
 from app.agent.state import AgentState
 from app.logging_config import get_logger
-from app.models import AgentProjectPlanRequest, PlanResponse
+from app.models import AgentProjectPlanRequest, Plan, PlanResponse
+from app.models.plan import plan_to_wire_dict, preview_record_to_wire_dict
+from app.models.plan import ConversationTurn
+from app.services.agent_preview import (
+    MAX_AGENT_PREVIEW_REVISIONS,
+    dry_run_plan_on_tables,
+    execution_result_to_execute_plan_response,
+    fingerprint_execution_tables,
+    merge_preview_history_mark_aborted,
+    merge_preview_history_mark_committed,
+    merge_preview_history_mark_revised,
+    project_state_to_execution_tables,
+    resolve_execution_tables_for_agent_request,
+)
+from app.services.plan_executor import TableData, apply_project_plan
+from app.services.projects import project_store
 from app.services.tools import get_tools_spec_for_llm
 
 router = APIRouter(prefix="/api", tags=["agent"])
 log = get_logger("api.agent")
 
 
-@router.post("/agent")
-async def agent(req: AgentProjectPlanRequest):
+def _resolve_project_tables_optional(req: AgentProjectPlanRequest) -> Optional[Dict[str, TableData]]:
+    """若请求携带 ``projectId`` 且项目存在，返回执行引擎表字典。
+
+    @param req: Agent 请求。
+    @return: 表字典；项目不存在时返回 ``None``（由调用方决定如何报错）。
     """
-    使用 Agent 循环（多轮 LLM + 工具）生成执行计划。
-    请求体与 /api/plan-project 相同；返回 plan 或 error/clarification。
-    """
+    if not req.projectId:
+        return None
+    state = project_store.get_project(req.projectId)
+    if not state:
+        return None
+    return project_state_to_execution_tables(state)
+
+
+async def _run_agent_core(
+    req: AgentProjectPlanRequest,
+    *,
+    preview_lifecycle: bool,
+    execution_tables: Optional[Dict[str, TableData]],
+) -> tuple[AgentState, Any]:
+    """构建初始状态并执行编排（含可选预览后处理）。"""
     state = initial_state_from_agent_project_request(req)
     log.info(
-        "agent start tables=%d history_turns=%d max_turns=%d model_source=%s prompt_len=%d tools_spec_count=%d",
+        "agent start tables=%d history_turns=%d max_turns=%d model_source=%s prompt_len=%d tools_spec_count=%d preview_lifecycle=%s",
         len(state.tables),
         len(req.history or []),
         state.max_turns,
         state.model_source,
         len(req.prompt or ""),
         len(get_tools_spec_for_llm()),
+        preview_lifecycle,
     )
-    final_state, action = await run_agent_orchestrated(state)
+    return await run_agent_orchestrated(
+        state,
+        preview_lifecycle=preview_lifecycle,
+        execution_tables=execution_tables,
+    )
+
+
+def _preview_record_plan_model(rec: Any) -> Plan:
+    """从 ``PreviewRecord`` 还原 ``Plan`` 对象。"""
+    from app.models.agent_models import PreviewRecord
+
+    if isinstance(rec, PreviewRecord):
+        return Plan.model_validate(rec.plan)
+    return Plan.model_validate(rec.get("plan") if isinstance(rec, dict) else rec.plan)
+
+
+@router.post("/agent")
+async def agent(req: AgentProjectPlanRequest):
+    """
+    使用 Agent 循环（多轮 LLM + 工具）生成执行计划。
+
+    请求体与 /api/plan-project 相同，并支持可选 ``previewLifecycle`` 与预览决策字段。
+    """
+    preview_lifecycle = bool(req.previewLifecycle)
+    project_snapshot = _resolve_project_tables_optional(req)
+    if req.projectId and project_snapshot is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"kind": "error", "reason": f"project_not_found:{req.projectId}"},
+        )
+
+    execution_tables = resolve_execution_tables_for_agent_request(
+        req,
+        project_tables=project_snapshot,
+    )
+
+    # --- 显式决策路径（不进入 LangGraph）---
+    if req.previewDecision == "abort":
+        if not req.previewId:
+            raise HTTPException(
+                status_code=400,
+                detail={"kind": "error", "reason": "preview_id_required"},
+            )
+        hist = merge_preview_history_mark_aborted(
+            list(req.previewHistory or []),
+            req.previewId,
+            req.revisionMessage,
+        )
+        return {
+            "kind": "preview_aborted",
+            "previewHistory": [preview_record_to_wire_dict(h) for h in hist],
+        }
+
+    if req.previewDecision == "confirm":
+        if not req.previewId:
+            raise HTTPException(
+                status_code=400,
+                detail={"kind": "error", "reason": "preview_id_required"},
+            )
+        plan_obj = req.commitPlan
+        if plan_obj is None:
+            for h in req.previewHistory or []:
+                hid = h.id if hasattr(h, "id") else h.get("id")
+                if hid == req.previewId:
+                    plan_obj = _preview_record_plan_model(h)
+                    break
+        if plan_obj is None:
+            raise HTTPException(
+                status_code=400,
+                detail={"kind": "error", "reason": "commit_plan_required"},
+            )
+        preview_rec = None
+        for h in req.previewHistory or []:
+            hid = h.id if hasattr(h, "id") else h.get("id")
+            if hid == req.previewId:
+                preview_rec = h
+                break
+        if preview_rec is None:
+            raise HTTPException(
+                status_code=400,
+                detail={"kind": "error", "reason": "preview_not_in_history"},
+            )
+        fp_expected = (
+            preview_rec.tables_fingerprint_at_preview
+            if hasattr(preview_rec, "tables_fingerprint_at_preview")
+            else preview_rec.get("tables_fingerprint_at_preview")
+        )
+        current_tables = resolve_execution_tables_for_agent_request(
+            req,
+            project_tables=project_snapshot,
+        )
+        if current_tables is None:
+            raise HTTPException(
+                status_code=400,
+                detail={"kind": "error", "reason": "execution_tables_required_for_confirm"},
+            )
+        fp_now = fingerprint_execution_tables(current_tables)
+        if fp_expected and fp_now != fp_expected:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "kind": "error",
+                    "reason": "stale_preview",
+                    "expectedFingerprint": fp_expected,
+                    "currentFingerprint": fp_now,
+                },
+            )
+        result = apply_project_plan(current_tables, plan_obj)
+        hist = merge_preview_history_mark_committed(
+            list(req.previewHistory or []),
+            req.previewId,
+        )
+        if req.projectId:
+            persisted_tables: Dict[str, Dict[str, Any]] = {}
+            for name, t in result.tables.items():
+                persisted_tables[name] = {
+                    "name": t.name,
+                    "rows": t.rows,
+                    "schema": [{"key": c.key, "type": c.type} for c in t.schema],
+                }
+            project_store.update_tables(req.projectId, persisted_tables)
+
+        exec_resp = execution_result_to_execute_plan_response(result)
+        return {
+            "kind": "committed",
+            "executeResult": exec_resp.model_dump(by_alias=True),
+            "previewHistory": [preview_record_to_wire_dict(h) for h in hist],
+        }
+
+    if req.previewDecision == "revise":
+        if req.revisionCount >= MAX_AGENT_PREVIEW_REVISIONS:
+            raise HTTPException(
+                status_code=429,
+                detail={
+                    "kind": "error",
+                    "reason": "preview_revision_cap",
+                    "max": MAX_AGENT_PREVIEW_REVISIONS,
+                },
+            )
+        if not req.previewId or not (req.revisionMessage or "").strip():
+            raise HTTPException(
+                status_code=400,
+                detail={"kind": "error", "reason": "preview_id_and_revision_message_required"},
+            )
+        hist = merge_preview_history_mark_revised(
+            list(req.previewHistory or []),
+            req.previewId,
+        )
+        extra = (req.revisionMessage or "").strip()
+        new_history = list(req.history or [])
+        new_history.append(
+            ConversationTurn(
+                role="user",
+                content=f"User revision request: {extra}",
+            )
+        )
+        revised_req = req.model_copy(
+            update={
+                "history": new_history,
+                "previewHistory": hist,
+                "revisionCount": req.revisionCount + 1,
+                "previewDecision": None,
+                "previewId": None,
+                "revisionMessage": None,
+            }
+        )
+        final_state, action = await _run_agent_core(
+            revised_req,
+            preview_lifecycle=preview_lifecycle,
+            execution_tables=execution_tables,
+        )
+        return _map_agent_result_to_response(
+            final_state,
+            action,
+        )
+
+    # --- 默认：生成路径 ---
+    final_state, action = await _run_agent_core(
+        req,
+        preview_lifecycle=preview_lifecycle,
+        execution_tables=execution_tables,
+    )
+    return _map_agent_result_to_response(
+        final_state,
+        action,
+    )
+
+
+def _map_agent_result_to_response(
+    final_state: AgentState,
+    action: Any,
+) -> Any:
+    """将终端 ``AgentAction`` 映射为 HTTP JSON 响应。"""
     kind = action_kind(action)
     log.info(
         "agent done kind=%s current_turn=%d summary=%s",
@@ -46,16 +276,38 @@ async def agent(req: AgentProjectPlanRequest):
         final_state.to_dict(),
     )
 
+    if kind == "preview_ready":
+        pra = cast(PreviewReadyAction, action)
+        return {
+            "kind": "preview_ready",
+            "plan": plan_to_wire_dict(pra.payload.plan),
+            "preview": preview_record_to_wire_dict(pra.payload.preview),
+            "previewHistory": [
+                preview_record_to_wire_dict(h) for h in final_state.preview_history
+            ],
+            "state": final_state.to_dict(),
+        }
+
     if kind == "output_plan":
-        return PlanResponse(plan=action.payload)
+        return PlanResponse(plan=cast(OutputPlanAction, action).payload)
+
     if kind == "finish":
         reason = (action.payload and action.payload.reason) or "unknown"
-        raise HTTPException(  # type: ignore[unreachable]
+        if isinstance(reason, str) and reason.startswith("llm_error:"):
+            inner = reason[len("llm_error:") :].strip()
+            if inner.startswith("[502]") or "AUTH_ERROR:" in inner:
+                raise _http_exception_from_runtime(RuntimeError(inner))
+            if "OPENROUTER_API_KEY missing" in inner or inner.startswith(
+                "Unknown modelSource:"
+            ):
+                raise HTTPException(status_code=400, detail=f"[400] {inner}")
+        raise HTTPException(
             status_code=422,
             detail={"kind": "error", "reason": reason},
         )
+
     if kind == "ask_clarification":
-        payload = action.payload
+        payload = cast(AskClarificationAction, action).payload
         return {
             "kind": "clarification",
             "plan": None,
@@ -65,7 +317,7 @@ async def agent(req: AgentProjectPlanRequest):
                 "context": payload.context,
             },
         }
-    # call_tool 不应在循环结束后出现
+
     raise HTTPException(
         status_code=500,
         detail={
@@ -75,9 +327,18 @@ async def agent(req: AgentProjectPlanRequest):
     )
 
 
-async def _agent_event_stream(state: AgentState) -> AsyncIterator[str]:
-    """代理到 orchestrator 的 SSE 序列（事件名与字段不变）。"""
-    async for chunk in stream_agent_events(state):
+async def _agent_event_stream(
+    state: AgentState,
+    *,
+    preview_lifecycle: bool,
+    execution_tables: Optional[Dict[str, TableData]],
+) -> AsyncIterator[str]:
+    """代理到 orchestrator 的 SSE 序列（事件名与字段保持后向兼容）。"""
+    async for chunk in stream_agent_events(
+        state,
+        preview_lifecycle=preview_lifecycle,
+        execution_tables=execution_tables,
+    ):
         yield chunk
 
 
@@ -85,18 +346,36 @@ async def _agent_event_stream(state: AgentState) -> AsyncIterator[str]:
 async def agent_stream(req: AgentProjectPlanRequest):
     """
     SSE 流式 Agent：按步骤推送 tool_call / tool_result / plan_done / finish / clarification 事件。
-    请求体与 /api/plan-project 相同。
+
+    当 ``previewLifecycle`` 为真且可解析执行表时，额外发送 ``preview_ready``（仍发送 ``plan_done``）。
     """
+    preview_lifecycle = bool(req.previewLifecycle)
+    project_snapshot = _resolve_project_tables_optional(req)
+    if req.projectId and project_snapshot is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"kind": "error", "reason": f"project_not_found:{req.projectId}"},
+        )
+    execution_tables = resolve_execution_tables_for_agent_request(
+        req,
+        project_tables=project_snapshot,
+    )
+
     state = initial_state_from_agent_project_request(req)
     log.info(
-        "agent_stream start tables=%d history_turns=%d max_turns=%d model_source=%s prompt_len=%d",
+        "agent_stream start tables=%d history_turns=%d max_turns=%d model_source=%s prompt_len=%d preview_lifecycle=%s",
         len(state.tables),
         len(req.history or []),
         state.max_turns,
         state.model_source,
         len(req.prompt or ""),
+        preview_lifecycle,
     )
     return StreamingResponse(
-        _agent_event_stream(state),
+        _agent_event_stream(
+            state,
+            preview_lifecycle=preview_lifecycle,
+            execution_tables=execution_tables,
+        ),
         media_type="text/event-stream",
     )

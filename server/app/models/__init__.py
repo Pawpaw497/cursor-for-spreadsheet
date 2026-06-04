@@ -1,5 +1,6 @@
 """Pydantic 模型 / 请求响应 Schema。"""
 
+from app.models.agent_models import PreviewRecord
 from app.models.chat import ChatMessage, ChatSession
 from app.models.plan import (
     AddColumnStep,
@@ -35,6 +36,7 @@ __all__ = [
     "Plan",
     "PlanRequest",
     "PlanResponse",
+    "PreviewRecord",
     "AgentProjectPlanRequest",
     "ProjectPlanRequest",
     "ProjectPlanByIdRequest",

@@ -4,12 +4,29 @@ from typing import Any, Dict, List, Optional
 
 from app.models.plan import Plan
 
-# 从 Plan 模型生成 JSON Schema，供注入到 system prompt
-_PLAN_SCHEMA_JSON: str = json.dumps(
-    Plan.model_json_schema(),
-    indent=2,
-    ensure_ascii=False,
-)
+
+def _strip_schema_metadata(obj: Any) -> Any:
+    """Drop description/title from JSON Schema blobs to reduce prompt tokens."""
+    if isinstance(obj, dict):
+        return {
+            k: _strip_schema_metadata(v)
+            for k, v in obj.items()
+            if k not in ("description", "title")
+        }
+    if isinstance(obj, list):
+        return [_strip_schema_metadata(item) for item in obj]
+    return obj
+
+
+def _compact_plan_schema_json() -> str:
+    """Compact Plan JSON Schema for system prompt injection."""
+    schema = _strip_schema_metadata(Plan.model_json_schema())
+    return json.dumps(schema, separators=(",", ":"), ensure_ascii=False)
+
+
+# 从 Plan 模型生成 compact JSON Schema，供注入到 system prompt。
+# 后端仍以 Plan.model_validate 为硬校验门，schema 仅指导 LLM 输出形状。
+_PLAN_SCHEMA_JSON: str = _compact_plan_schema_json()
 
 
 def build_spreadsheet_system() -> str:
@@ -87,17 +104,26 @@ _SPREADSHEET_RULES = (
     '{"action":"sort_table","column": string,'
     '"order":"ascending"|"descending"}; '
     "only changes row order, not values.\n"
-    "- filter_rows / delete_rows: condition is the same row expression form as add_column; "
-    "filter_rows keeps matching rows, delete_rows removes matching rows.\n"
-    "- deduplicate_rows: keys list which columns define uniqueness; keep first|last.\n"
-    "- fill_missing: strategy constant|mean|median|mode; value used when strategy=constant.\n"
+    "- filter_rows / delete_rows: same expression shape as add_column (boolean per row); "
+    "filter_rows keeps truthy rows; delete_rows removes truthy rows.\n"
+    "- deduplicate_rows: keys = columns that form row identity; keep first|last row when duplicates.\n"
+    "- rename_column: fromName -> toName; updates schema keys.\n"
+    "- fill_missing: strategy constant|mean|median|mode; value only for constant.\n"
     "- cast_column_type: targetType number|string|date.\n"
-    "- delete_column: remove a column; reorder_columns: partial order, rest append.\n"
-    "- validate_table: rules are row expressions; no data change; use level warn|error.\n"
-    "- pivot_table: index=row id columns, columns=column to spread, values=cell values, "
-    "resultTable=new wide table. unpivot_table: idVars + valueVars to long format.\n"
+    "- join_tables: left/right table names, keys, joinType inner|left|right; resultTable new name.\n"
+    "- create_table: copy/filter from source; optional expression (rows)=>filtered list.\n"
+    "- aggregate_table: groupBy + aggregations (op sum|avg|count|max|min, as alias); resultTable.\n"
+    "- union_tables: sources + mode strict|relaxed; resultTable.\n"
+    "- lookup_column: enrich mainTable from lookupTable on keys; columns map from->to.\n"
+    "- delete_column: remove column; reorder_columns: partial list, unspecified columns follow.\n"
+    "- validate_table: rules[] are row-level booleans (same row.x form); does not change data; "
+    "level=warn fills validationWarnings on failure, level=error fills validationErrors.\n"
+    "- pivot_table (single-table context): index=group keys, columns=pivot dimension column, "
+    "values=measure column, agg=sum|count|avg|max|min; output columns like values_<pivotValue>.\n"
+    "- unpivot_table: idVars stay fixed; each valueVars column becomes a row; varName/valueName "
+    "name the pair columns; resultTable=new long table.\n"
     "- For multi-table output use join_tables, create_table, aggregate_table, "
-    "pivot_table, union_tables, or lookup_column as in schema.\n"
+    "pivot_table (with source+resultTable), union_tables, or lookup_column per schema.\n"
 )
 
 
@@ -113,15 +139,18 @@ _PROJECT_RULES = (
     "- join_tables: join left and right on leftKey/rightKey; resultTable is the new name.\n"
     "- create_table: from source; expression optional (rows)=>filtered rows.\n"
     "- sort_table: only changes row order in the target table.\n"
-    "- filter_rows / delete_rows / deduplicate_rows: same as single-table rules; "
-    "set table when multiple tables exist.\n"
-    "- aggregate_table: groupBy + aggregations with op sum|avg|count|max|min; "
-    "resultTable is new table.\n"
+    "- filter_rows / delete_rows: boolean row expression; filter keeps matches, delete removes matches; "
+    "set table when multiple tables.\n"
+    "- deduplicate_rows: keys + keep first|last; set table when multiple tables.\n"
+    "- rename_column / fill_missing / cast_column_type: optional table for multi-table.\n"
+    "- aggregate_table: groupBy + aggregations with op sum|avg|count|max|min; resultTable is new.\n"
     "- union_tables: sources list; mode strict=common columns only, relaxed=union all keys.\n"
     "- lookup_column: VLOOKUP-style from lookupTable to mainTable on key columns.\n"
     "- delete_column / reorder_columns: structural changes on one table.\n"
-    "- validate_table: list of row-level checks; does not change data.\n"
-    "- pivot_table / unpivot_table: resultTable must be a new name; source is the input table name.\n"
+    "- validate_table: rules are row booleans; optional table; level warn|error ties to "
+    "validationWarnings vs validationErrors in diff; never mutates rows.\n"
+    "- pivot_table / unpivot_table: source=existing table name; resultTable=new unique name; "
+    "pivot: index, columns, values, agg; unpivot: idVars, valueVars, varName, valueName.\n"
 )
 
 # 模块加载时生成，对外仍为常量

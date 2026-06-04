@@ -4,7 +4,7 @@ import {
   logError,
   logInfo
 } from "./logger";
-import type { Diff, Plan, SchemaCol, TableData } from "./types";
+import type { Diff, Plan, PreviewRecord, SchemaCol, TableData } from "./types";
 
 const AggregationSpecSchema = z.object({
   column: z.string(),
@@ -188,15 +188,62 @@ const PlanSchema = z.object({
   steps: z.array(StepSchema).min(1)
 });
 
+type ExecutePlanResponse = {
+  tables: Record<
+    string,
+    {
+      name: string;
+      rows: Record<string, any>[];
+      schema: SchemaCol[];
+    }
+  >;
+  diff: {
+    addedColumns: string[];
+    modifiedColumns: string[];
+    validationWarnings: string[];
+    validationErrors: string[];
+  };
+  newTables: string[];
+};
+
+/** 与后端 ``ExecuteTable`` 对齐：``model_dump()`` 可能得到 ``schema_`` 而非 ``schema``。 */
+type ExecuteTableWire = {
+  name: string;
+  rows: Record<string, any>[];
+  schema?: SchemaCol[];
+  schema_?: SchemaCol[];
+};
+
+function schemaFromExecuteTableWire(t: ExecuteTableWire): SchemaCol[] {
+  return (t.schema ?? t.schema_ ?? []) as SchemaCol[];
+}
+
+function normalizeExecuteDiff(
+  d: Partial<ExecutePlanResponse["diff"]> | undefined
+): Diff {
+  return {
+    addedColumns: d?.addedColumns ?? [],
+    modifiedColumns: d?.modifiedColumns ?? [],
+    validationWarnings: d?.validationWarnings ?? [],
+    validationErrors: d?.validationErrors ?? []
+  };
+}
+
 export type ModelSource = "cloud" | "local";
 
 export type ModelOption = { id: string; label: string };
 
 export type ConfigResponse = {
+  /** 本次 uvicorn/FastAPI 进程启动 ID；前端气泡对话仅在此 session 内保留。 */
+  serverBootId?: string;
   openRouterModel: string;
   openRouterModels: ModelOption[];
   ollamaModel: string;
   ollamaModels: ModelOption[];
+  /** 后端各上游 LLM HTTP 调用的最大秒数（与 `server/app/services/llm.py` 一致）。 */
+  llmUpstreamMaxTimeoutSeconds?: number;
+  /** 建议的前端 LLM 请求总超时（毫秒）= 上游最大 + 缓冲；由 `/api/config` 下发。 */
+  llmClientTimeoutRecommendedMs?: number;
 };
 
 export type ChatRole = "user" | "assistant" | "system";
@@ -213,16 +260,38 @@ export type ChatMessage = {
   source: ChatMessageSource;
   // meta 保留原始后端 payload 或前端补充信息，用于将来扩展“展开原始 Plan/请求”等高级功能。
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  meta?: any;
+  meta?: {
+    modelSource?: ModelSource;
+    modelId?: string | null;
+    modelTag?: string;
+    [key: string]: unknown;
+  };
 };
 
 const API_BASE = "http://localhost:8787";
 
 const TIMEOUT_DEFAULT_MS = 8000;
-const TIMEOUT_LLM_MS = 180000;
+/**
+ * 与后端 `recommended_llm_client_timeout_ms()` 在默认常量下一致：
+ * max(60, 90, 120)s + 30s 缓冲 → 150s。在成功拉取 `/api/config` 前作为 LLM 请求超时。
+ */
+const FALLBACK_LLM_CLIENT_TIMEOUT_MS = 150_000;
+
+let configuredLlmClientTimeoutMs: number | null = null;
+
+/** 当前用于 `/api/plan*`、`/api/agent*` 等 LLM 调用的客户端超时（毫秒）。 */
+export function getLlmClientTimeoutMs(): number {
+  return configuredLlmClientTimeoutMs ?? FALLBACK_LLM_CLIENT_TIMEOUT_MS;
+}
 const TIMEOUT_IMPORT_MS = 20000;
 const TIMEOUT_EXECUTE_MS = 120000;
 const TIMEOUT_EXPORT_MS = 60000;
+
+/**
+ * Agent ``previewTables`` 每张表最大行数（须与后端
+ * ``app.services.agent_preview.PREVIEW_TABLES_MAX_ROWS_PER_TABLE`` 一致）。
+ */
+export const PREVIEW_TABLES_MAX_ROWS_PER_TABLE = 5000;
 
 type FetchLogOptions = {
   /** 用于控制台与后端对齐的请求关联 ID。 */
@@ -230,6 +299,68 @@ type FetchLogOptions = {
   /** 业务操作名，如 request_plan。 */
   operation: string;
 };
+
+/**
+ * 将可选的调用方 ``AbortSignal`` 与基于 ``timeoutMs`` 的超时控制器合并；
+ * 任一 abort 则合成 signal 进入 aborted 状态。
+ *
+ * @returns ``armTimeout`` 须在发起 ``fetch`` 前调用；``disarm`` 在 ``finally`` 中调用以清理定时器与监听器。
+ */
+export function combinedAbortSignalForFetch(
+  timeoutMs: number,
+  userSignal?: AbortSignal
+): {
+  signal: AbortSignal;
+  armTimeout: () => void;
+  disarm: () => void;
+} {
+  const timeoutController = new AbortController();
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  let disposables: (() => void) | undefined;
+
+  const armTimeout = () => {
+    timeoutId = setTimeout(() => timeoutController.abort(), timeoutMs);
+  };
+
+  const disarm = () => {
+    if (timeoutId !== undefined) {
+      clearTimeout(timeoutId);
+      timeoutId = undefined;
+    }
+    disposables?.();
+    disposables = undefined;
+  };
+
+  if (!userSignal) {
+    return { signal: timeoutController.signal, armTimeout, disarm };
+  }
+
+  const anyFn = (
+    AbortSignal as unknown as { any?: (signals: AbortSignal[]) => AbortSignal }
+  ).any;
+  if (typeof anyFn === "function") {
+    return {
+      signal: anyFn([userSignal, timeoutController.signal]),
+      armTimeout,
+      disarm
+    };
+  }
+
+  const merged = new AbortController();
+  const forward = () => {
+    merged.abort();
+  };
+  userSignal.addEventListener("abort", forward);
+  timeoutController.signal.addEventListener("abort", forward);
+  disposables = () => {
+    userSignal.removeEventListener("abort", forward);
+    timeoutController.signal.removeEventListener("abort", forward);
+  };
+  if (userSignal.aborted || timeoutController.signal.aborted) {
+    merged.abort();
+  }
+  return { signal: merged.signal, armTimeout, disarm };
+}
 
 function requestPath(url: string): string {
   try {
@@ -258,21 +389,22 @@ async function fetchWithTimeout(
   const path = requestPath(url);
   const method = (init?.method ?? "GET").toUpperCase();
 
-  const headers = new Headers(init?.headers);
+  const { signal: userSignal, ...restInit } = init ?? {};
+  const headers = new Headers(restInit.headers);
   if (!headers.has("X-Request-ID")) {
     headers.set("X-Request-ID", traceId);
   }
 
   logInfo("request_start", { operation, path, traceId, method });
 
-  const controller = new AbortController();
-  const id = setTimeout(() => controller.abort(), timeoutMs);
+  const abortCtl = combinedAbortSignalForFetch(timeoutMs, userSignal);
+  abortCtl.armTimeout();
   const t0 = performance.now();
   try {
     const resp = await fetch(url, {
-      ...init,
+      ...restInit,
       headers,
-      signal: controller.signal
+      signal: abortCtl.signal
     });
     const durationMs = Math.round(performance.now() - t0);
     if (!resp.ok) {
@@ -297,37 +429,59 @@ async function fetchWithTimeout(
   } catch (e) {
     const err = e as Error;
     const durationMs = Math.round(performance.now() - t0);
-    const isTimeout = err.name === "AbortError";
+    const isAbort = err.name === "AbortError";
+    const abortedByUser = Boolean(userSignal?.aborted);
     logError("request_error", {
       operation,
       path,
       traceId,
-      isTimeout,
+      isTimeout: isAbort && !abortedByUser,
+      abortedByUser,
       durationMs,
-      message: isTimeout
-        ? `请求超时（>${timeoutMs}ms），请检查后端是否在 ${API_BASE} 运行`
+      message: isAbort
+        ? abortedByUser
+          ? "请求已取消"
+          : `请求超时（>${timeoutMs}ms），请检查后端是否在 ${API_BASE} 运行`
         : err.message
     });
-    if (isTimeout) {
+    if (isAbort) {
+      if (abortedByUser) {
+        throw e;
+      }
       throw new Error(
         `请求超时（>${timeoutMs}ms），请检查后端是否在 ${API_BASE} 运行`
       );
     }
     throw e;
   } finally {
-    clearTimeout(id);
+    abortCtl.disarm();
   }
+}
+
+/** 从错误响应 body 解析可读信息（string detail 或 `{ reason }` 对象）。 */
+export function parseApiErrorMessage(status: number, txt: string): string {
+  try {
+    const j = JSON.parse(txt) as {
+      detail?: string | { reason?: string };
+    };
+    if (j && typeof j.detail === "string") return j.detail;
+    if (
+      j &&
+      j.detail &&
+      typeof j.detail === "object" &&
+      typeof j.detail.reason === "string"
+    ) {
+      return `[${status}] ${j.detail.reason}`;
+    }
+  } catch {
+    // ignore
+  }
+  return txt ? `[${status}] ${txt}` : `[${status}] Request failed`;
 }
 
 /** 从错误响应的 body 中解析出可读信息；若为 JSON 且含 detail 则返回 detail（后端已含错误号），否则返回 "[status] 原始文本"。 */
 function errorMessageFromResponse(resp: Response, txt: string): string {
-  try {
-    const j = JSON.parse(txt) as { detail?: string };
-    if (j && typeof j.detail === "string") return j.detail;
-  } catch {
-    // ignore
-  }
-  return txt ? `[${resp.status}] ${txt}` : `[${resp.status}] Request failed`;
+  return parseApiErrorMessage(resp.status, txt);
 }
 
 /**
@@ -367,7 +521,15 @@ export async function fetchConfig(): Promise<ConfigResponse> {
     const txt = await resp.text();
     throw new Error(errorMessageFromResponse(resp, txt));
   }
-  return resp.json();
+  const data = (await resp.json()) as ConfigResponse;
+  if (
+    typeof data.llmClientTimeoutRecommendedMs === "number" &&
+    Number.isFinite(data.llmClientTimeoutRecommendedMs) &&
+    data.llmClientTimeoutRecommendedMs >= 10_000
+  ) {
+    configuredLlmClientTimeoutMs = Math.floor(data.llmClientTimeoutRecommendedMs);
+  }
+  return data;
 }
 
 export async function requestPlan(opts: {
@@ -394,7 +556,7 @@ export async function requestPlan(opts: {
         localModelId: opts.localModelId ?? undefined
       })
     },
-    TIMEOUT_LLM_MS,
+    getLlmClientTimeoutMs(),
     { operation: "request_plan", traceId: opts.traceId }
   );
 
@@ -405,6 +567,209 @@ export async function requestPlan(opts: {
 
   const data = await resp.json();
   return PlanSchema.parse(data.plan);
+}
+
+export function parseAgentPreviewRecord(raw: Record<string, unknown>): PreviewRecord {
+  const planRaw = raw.plan as Record<string, unknown>;
+  return {
+    id: String(raw.id),
+    plan: PlanSchema.parse(planRaw),
+    diff: normalizeExecuteDiff(raw.diff as ExecutePlanResponse["diff"] | undefined),
+    newTables: (raw.newTables as string[] | undefined) ?? (raw.new_tables as string[] | undefined) ?? [],
+    status: (raw.status as PreviewRecord["status"]) ?? "pending",
+    user_decision:
+      (raw.user_decision as PreviewRecord["user_decision"]) ??
+      (raw.userDecision as PreviewRecord["user_decision"]) ??
+      null,
+    user_decision_reason:
+      (raw.user_decision_reason as string | null | undefined) ??
+      (raw.userDecisionReason as string | null | undefined) ??
+      null,
+    execution_error:
+      (raw.execution_error as string | null | undefined) ??
+      (raw.executionError as string | null | undefined) ??
+      null,
+    tables_fingerprint_at_preview: String(
+      raw.tables_fingerprint_at_preview ?? raw.tablesFingerprintAtPreview ?? ""
+    ),
+    created_at: Number(raw.created_at ?? raw.createdAt ?? 0),
+    resolved_at:
+      raw.resolved_at != null
+        ? Number(raw.resolved_at)
+        : raw.resolvedAt != null
+          ? Number(raw.resolvedAt)
+          : null
+  };
+}
+
+export type AgentProjectPlanResult =
+  | { kind: "plan"; plan: Plan }
+  | {
+      kind: "preview_ready";
+      plan: Plan;
+      preview: PreviewRecord;
+      previewHistory: PreviewRecord[];
+      state: Record<string, unknown>;
+    }
+  | {
+      kind: "committed";
+      executeResult: {
+        tables: Record<string, TableData>;
+        diff: Diff;
+        newTables: string[];
+      };
+      previewHistory: PreviewRecord[];
+    }
+  | { kind: "preview_aborted"; previewHistory: PreviewRecord[] }
+  | {
+      kind: "clarification";
+      clarification: { question: string; options?: string[] | null; context?: string | null };
+    };
+
+export async function requestAgentProjectPlan(opts: {
+  prompt: string;
+  tables: TableData[];
+  modelSource?: ModelSource;
+  cloudModelId?: string;
+  localModelId?: string;
+  traceId?: string;
+  history?: { role: "user" | "assistant"; content: string }[];
+  appliedPlansSummary?: string;
+  previewLifecycle?: boolean;
+  projectId?: string | null;
+  previewTables?: TableData[];
+  previewHistory?: PreviewRecord[];
+  revisionCount?: number;
+  previewDecision?: "confirm" | "abort" | "revise";
+  previewId?: string | null;
+  revisionMessage?: string | null;
+  commitPlan?: Plan | null;
+  /** 与超时合成后任一 abort 即取消本次 ``fetch``（例如连续提交时取消上一次 in-flight 请求）。 */
+  signal?: AbortSignal;
+}): Promise<AgentProjectPlanResult> {
+  const tablesPayload = opts.tables.map((t) => ({
+    name: t.name,
+    schema: t.schema,
+    sampleRows: t.rows.slice(0, 10)
+  }));
+  const previewTablesPayload =
+    opts.previewTables?.map((t) => ({
+      name: t.name,
+      rows: t.rows.slice(0, PREVIEW_TABLES_MAX_ROWS_PER_TABLE),
+      schema: t.schema
+    })) ?? undefined;
+  const previewHistoryPayload = (opts.previewHistory ?? []).map((p) => ({
+    id: p.id,
+    plan: p.plan,
+    diff: p.diff,
+    newTables: p.newTables,
+    status: p.status,
+    user_decision: p.user_decision ?? undefined,
+    user_decision_reason: p.user_decision_reason ?? undefined,
+    execution_error: p.execution_error ?? undefined,
+    tables_fingerprint_at_preview: p.tables_fingerprint_at_preview ?? "",
+    created_at: p.created_at,
+    resolved_at: p.resolved_at ?? undefined
+  }));
+  const body: Record<string, unknown> = {
+    prompt: opts.prompt,
+    tables: tablesPayload,
+    modelSource: opts.modelSource ?? "cloud",
+    cloudModelId: opts.cloudModelId ?? undefined,
+    localModelId: opts.localModelId ?? undefined,
+    history: opts.history ?? [],
+    appliedPlansSummary: opts.appliedPlansSummary,
+    previewLifecycle: opts.previewLifecycle ?? false,
+    revisionCount: opts.revisionCount ?? 0,
+    previewHistory: previewHistoryPayload
+  };
+  if (opts.projectId) {
+    body.projectId = opts.projectId;
+  }
+  if (previewTablesPayload) {
+    body.previewTables = previewTablesPayload;
+  }
+  if (opts.previewDecision) {
+    body.previewDecision = opts.previewDecision;
+  }
+  if (opts.previewId) {
+    body.previewId = opts.previewId;
+  }
+  if (opts.revisionMessage) {
+    body.revisionMessage = opts.revisionMessage;
+  }
+  if (opts.commitPlan) {
+    body.commitPlan = opts.commitPlan;
+  }
+  const resp = await fetchWithTimeout(
+    `${API_BASE}/api/agent`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: opts.signal
+    },
+    getLlmClientTimeoutMs(),
+    { operation: "request_agent_project_plan", traceId: opts.traceId }
+  );
+  if (!resp.ok) {
+    const txt = await resp.text();
+    throw new Error(errorMessageFromResponse(resp, txt));
+  }
+  const data = (await resp.json()) as Record<string, unknown>;
+  const kind = String(data.kind ?? "");
+  if (kind === "preview_ready") {
+    const previewRaw = data.preview as Record<string, unknown>;
+    const histRaw = (data.previewHistory as Record<string, unknown>[] | undefined) ?? [];
+    return {
+      kind: "preview_ready",
+      plan: PlanSchema.parse(data.plan as Record<string, unknown>),
+      preview: parseAgentPreviewRecord(previewRaw),
+      previewHistory: histRaw.map((r) => parseAgentPreviewRecord(r)),
+      state: (data.state as Record<string, unknown>) ?? {}
+    };
+  }
+  if (kind === "committed") {
+    const exec = data.executeResult as ExecutePlanResponse;
+    const histRaw = (data.previewHistory as Record<string, unknown>[] | undefined) ?? [];
+    const nextTables: Record<string, TableData> = {};
+    for (const [name, t] of Object.entries(exec.tables)) {
+      const tw = t as ExecuteTableWire;
+      nextTables[name] = {
+        name: tw.name,
+        rows: tw.rows,
+        schema: schemaFromExecuteTableWire(tw)
+      };
+    }
+    return {
+      kind: "committed",
+      executeResult: {
+        tables: nextTables,
+        diff: normalizeExecuteDiff(exec.diff),
+        newTables: exec.newTables ?? []
+      },
+      previewHistory: histRaw.map((r) => parseAgentPreviewRecord(r))
+    };
+  }
+  if (kind === "preview_aborted") {
+    const histRaw = (data.previewHistory as Record<string, unknown>[] | undefined) ?? [];
+    return {
+      kind: "preview_aborted",
+      previewHistory: histRaw.map((r) => parseAgentPreviewRecord(r))
+    };
+  }
+  if (kind === "clarification") {
+    const c = data.clarification as {
+      question: string;
+      options?: string[] | null;
+      context?: string | null;
+    };
+    return { kind: "clarification", clarification: c };
+  }
+  if (data.plan) {
+    return { kind: "plan", plan: PlanSchema.parse(data.plan as Record<string, unknown>) };
+  }
+  throw new Error("Unexpected /api/agent response shape");
 }
 
 export async function requestProjectPlan(opts: {
@@ -433,7 +798,7 @@ export async function requestProjectPlan(opts: {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload)
     },
-    TIMEOUT_LLM_MS,
+    getLlmClientTimeoutMs(),
     { operation: "request_project_plan", traceId: opts.traceId }
   );
 
@@ -559,7 +924,7 @@ export async function requestProjectPlanById(opts: {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload)
     },
-    TIMEOUT_LLM_MS,
+    getLlmClientTimeoutMs(),
     { operation: "request_project_plan_by_id", traceId: opts.traceId }
   );
 
@@ -592,35 +957,6 @@ export async function exportProjectToExcel(
     throw new Error(errorMessageFromResponse(resp, txt || "导出失败"));
   }
   return resp.blob();
-}
-
-type ExecutePlanResponse = {
-  tables: Record<
-    string,
-    {
-      name: string;
-      rows: Record<string, any>[];
-      schema: SchemaCol[];
-    }
-  >;
-  diff: {
-    addedColumns: string[];
-    modifiedColumns: string[];
-    validationWarnings: string[];
-    validationErrors: string[];
-  };
-  newTables: string[];
-};
-
-function normalizeExecuteDiff(
-  d: Partial<ExecutePlanResponse["diff"]> | undefined
-): Diff {
-  return {
-    addedColumns: d?.addedColumns ?? [],
-    modifiedColumns: d?.modifiedColumns ?? [],
-    validationWarnings: d?.validationWarnings ?? [],
-    validationErrors: d?.validationErrors ?? []
-  };
 }
 
 /** 调用后端 /api/execute-plan，在服务端执行 Plan 并返回更新后的表与 Diff。 */
@@ -657,10 +993,11 @@ export async function executePlanOnServer(opts: {
   const data = (await resp.json()) as ExecutePlanResponse;
   const nextTables: Record<string, TableData> = {};
   for (const [name, t] of Object.entries(data.tables)) {
+    const tw = t as ExecuteTableWire;
     nextTables[name] = {
-      name: t.name,
-      rows: t.rows,
-      schema: t.schema
+      name: tw.name,
+      rows: tw.rows,
+      schema: schemaFromExecuteTableWire(tw)
     };
   }
   return {
@@ -695,10 +1032,11 @@ export async function executeProjectPlanById(opts: {
   const data = (await resp.json()) as ExecutePlanResponse;
   const nextTables: Record<string, TableData> = {};
   for (const [name, t] of Object.entries(data.tables)) {
+    const tw = t as ExecuteTableWire;
     nextTables[name] = {
-      name: t.name,
-      rows: t.rows,
-      schema: t.schema
+      name: tw.name,
+      rows: tw.rows,
+      schema: schemaFromExecuteTableWire(tw)
     };
   }
   return {

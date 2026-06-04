@@ -9,9 +9,22 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import Response, StreamingResponse
 
-from app.config import settings
+from app.config import SERVER_BOOT_ID, settings
+from app.services import audit_db
+from app.services.audit_log import (
+    extract_audit_context,
+    parse_request_body_for_audit,
+    parse_response_body_for_audit,
+    schedule_record_http_request,
+)
 from app.api.routes import agent, chat, config, export, health, load, plan
+from app.services.llm import (
+    LLM_HTTP_LIMITS,
+    create_llm_http_client,
+    set_shared_llm_http_client,
+)
 from app.logging_config import (
     get_logger,
     init_logging,
@@ -85,15 +98,31 @@ def _stop_ollama_if_started() -> None:
 async def lifespan(app: FastAPI):
     """应用生命周期：启动时尝试启动本地 Ollama，关闭时清理。"""
     logger.info(
-        "app startup title=%s auto_start_ollama=%s ollama_base=%s",
+        "app startup title=%s server_boot_id=%s auto_start_ollama=%s ollama_base=%s",
         settings.APP_TITLE,
+        SERVER_BOOT_ID,
         settings.AUTO_START_OLLAMA,
         settings.OLLAMA_BASE,
     )
     _start_ollama()
-    yield
-    logger.info("app shutdown")
-    _stop_ollama_if_started()
+    llm_http_client = create_llm_http_client()
+    set_shared_llm_http_client(llm_http_client)
+    logger.info(
+        "llm httpx AsyncClient started max_connections=%s max_keepalive=%s keepalive_expiry=%s",
+        LLM_HTTP_LIMITS.max_connections,
+        LLM_HTTP_LIMITS.max_keepalive_connections,
+        LLM_HTTP_LIMITS.keepalive_expiry,
+    )
+    await audit_db.init_audit_db()
+    try:
+        yield
+    finally:
+        logger.info("app shutdown")
+        await audit_db.close_audit_db()
+        set_shared_llm_http_client(None)
+        await llm_http_client.aclose()
+        logger.info("llm httpx AsyncClient closed")
+        _stop_ollama_if_started()
 
 
 app = FastAPI(title=settings.APP_TITLE, lifespan=lifespan)
@@ -102,38 +131,117 @@ http_logger = get_logger("http")
 
 
 class RequestLoggingMiddleware(BaseHTTPMiddleware):
-    """记录请求起止、注入 X-Request-ID 与 trace 上下文。"""
+    """记录请求起止、注入 X-Request-ID、捕获审计字段并异步落库。"""
 
     async def dispatch(self, request: Request, call_next):
         raw = request.headers.get("X-Request-ID")
         trace_id = (raw.strip() if raw else "") or uuid.uuid4().hex
         token = set_trace_id(trace_id)
         start = time.perf_counter()
+        path = request.url.path
         client_host = request.client.host if request.client else "-"
         ua = (request.headers.get("user-agent") or "")[:120]
         http_logger.info(
             "request start method=%s path=%s client=%s ua=%s",
             request.method,
-            request.url.path,
+            path,
             client_host,
             ua,
         )
+
+        body_bytes = await request.body()
+
+        async def receive():
+            return {"type": "http.request", "body": body_bytes, "more_body": False}
+
+        replay_request = Request(request.scope, receive)
+        req_content_type = request.headers.get("content-type")
+        req_body_audit = parse_request_body_for_audit(
+            body_bytes,
+            path=path,
+            content_type=req_content_type,
+        )
+        audit_ctx = extract_audit_context(replay_request, body=req_body_audit, path=path)
+
+        response_status: int | None = None
+        response_body_audit: object | None = None
+        error_detail: str | None = None
+        is_streaming = False
+
         try:
-            response = await call_next(request)
+            response = await call_next(replay_request)
             response.headers["X-Request-ID"] = trace_id
+            response_status = response.status_code
+            is_streaming = isinstance(response, StreamingResponse)
+            if is_streaming:
+                response_body_audit = parse_response_body_for_audit(
+                    b"",
+                    path=path,
+                    content_type=response.headers.get("content-type"),
+                    is_streaming=True,
+                )
+            else:
+                chunks: list[bytes] = []
+                async for chunk in response.body_iterator:
+                    chunks.append(chunk)
+                resp_bytes = b"".join(chunks)
+                response_body_audit = parse_response_body_for_audit(
+                    resp_bytes,
+                    path=path,
+                    content_type=response.headers.get("content-type"),
+                    is_streaming=False,
+                )
+                response = Response(
+                    content=resp_bytes,
+                    status_code=response.status_code,
+                    headers=dict(response.headers),
+                    media_type=response.media_type,
+                )
             elapsed_ms = (time.perf_counter() - start) * 1000
             http_logger.info(
                 "request end status=%s elapsed_ms=%.2f error=%s",
-                response.status_code,
+                response_status,
                 elapsed_ms,
-                response.status_code >= 400,
+                response_status >= 400,
             )
             return response
-        except Exception:
+        except HTTPException as exc:
             elapsed_ms = (time.perf_counter() - start) * 1000
+            response_status = exc.status_code
+            error_detail = str(exc.detail)
+            http_logger.warning(
+                "request HTTPException status=%s elapsed_ms=%.2f path=%s",
+                exc.status_code,
+                elapsed_ms,
+                path,
+            )
+            raise
+        except Exception as exc:
+            elapsed_ms = (time.perf_counter() - start) * 1000
+            response_status = 500
+            error_detail = str(exc)
             http_logger.exception("request failed elapsed_ms=%.2f", elapsed_ms)
             raise
         finally:
+            elapsed_ms = (time.perf_counter() - start) * 1000
+            schedule_record_http_request(
+                trace_id=trace_id,
+                method=request.method,
+                path=path,
+                query_params=dict(request.query_params),
+                request_body=req_body_audit,
+                response_status=response_status,
+                response_body=response_body_audit,
+                error_detail=error_detail,
+                duration_ms=elapsed_ms,
+                client_host=client_host,
+                project_id=audit_ctx.get("project_id"),
+                session_id=audit_ctx.get("session_id"),
+                workspace_key_hash=audit_ctx.get("workspace_key_hash"),
+                workspace_kind=audit_ctx.get("workspace_kind"),
+                model_tag=audit_ctx.get("model_tag"),
+                request_kind=audit_ctx.get("request_kind"),
+            )
             reset_trace_id(token)
 
 

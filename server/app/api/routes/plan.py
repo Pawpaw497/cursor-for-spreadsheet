@@ -115,6 +115,11 @@ def _http_exception_from_runtime(e: RuntimeError) -> HTTPException:
         对应的 HTTPException 实例。
     """
     msg = str(e)
+
+    def _detail_502() -> str:
+        if msg.startswith("[502]"):
+            return msg
+        return f"[502] {msg}"
     # 约定：AUTH_ERROR 前缀由 app.services.llm._raise_openrouter_error 添加。
     is_auth_error = (
         "AUTH_ERROR:" in msg
@@ -129,7 +134,7 @@ def _http_exception_from_runtime(e: RuntimeError) -> HTTPException:
                  f"（技术详情：{msg}）"
         return HTTPException(status_code=502, detail=detail)
 
-    return HTTPException(status_code=502, detail=f"[502] {msg}")
+    return HTTPException(status_code=502, detail=_detail_502())
 
 
 @router.post("/plan", response_model=PlanResponse)

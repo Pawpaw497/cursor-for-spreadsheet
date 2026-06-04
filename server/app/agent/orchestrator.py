@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any, AsyncIterator, Optional, TypedDict, cast
+from typing import Any, AsyncIterator, Dict, Optional, TypedDict, cast
 
 from langgraph.graph import END, START, StateGraph
 
@@ -15,17 +15,36 @@ from app.agent.actions import (
     FinishAction,
     FinishPayload,
     OutputPlanAction,
+    PreviewReadyAction,
+    PreviewReadyPayload,
     AgentAction,
     action_kind,
 )
-from app.agent.decision import decision, run_tool_and_append_messages
+from app.agent.agent_helpers import run_tool_and_append_messages
+from app.agent.pa_decision import pa_decision_step
 from app.agent.state import AgentState
 from app.logging_config import get_logger
-from app.models.plan import Plan
+from app.models.plan import Plan, plan_to_wire_dict, preview_record_to_wire_dict
+from app.services.agent_preview import (
+    PreviewEvaluationCap,
+    PreviewEvaluationReady,
+    PreviewEvaluationRevise,
+    evaluate_output_plan_preview,
+)
+from app.services.plan_executor import TableData
 from app.agent.sub_agents.context_analyzer import analyze_context
 from app.agent.sub_agents.intent_analyzer import analyze_intent
 
 log = get_logger("agent.orchestrator")
+
+
+async def agent_react_step(
+    state: AgentState,
+    *,
+    use_tools: bool = True,
+) -> tuple[AgentState, AgentAction]:
+    """Single ReAct LLM turn shared by sync graph ``llm_decide`` and SSE stream."""
+    return await pa_decision_step(state, use_tools=use_tools)
 
 
 class AgentGraphState(TypedDict, total=False):
@@ -92,9 +111,9 @@ def _node_intent(s: AgentGraphState) -> AgentGraphState:
 
 
 async def _node_llm_decide(s: AgentGraphState) -> AgentGraphState:
-    """llm 决策：对应 plan_generator 单步，内部调用 `decision`。"""
+    """llm 决策（invoke_llm）：委托共享 ``agent_react_step``。"""
     agent = AgentState.model_validate(s["agent"])
-    new_agent, act = await decision(agent, use_tools=True)
+    new_agent, act = await agent_react_step(agent, use_tools=True)
     k = action_kind(act)
     scratch: dict = {}
     if k == "call_tool":
@@ -165,20 +184,69 @@ def get_compiled_agent_graph() -> Any:
 
 async def run_agent_orchestrated(
     initial: AgentState,
+    *,
+    preview_lifecycle: bool = False,
+    execution_tables: Optional[Dict[str, TableData]] = None,
 ) -> tuple[AgentState, AgentAction]:
-    """与历史 `run_agent_loop` 出口语义一致。"""
+    """运行 LangGraph 编排；可选在 ``output_plan`` 后做服务端 dry-run 并返回 ``preview_ready``。
+
+    当 ``preview_lifecycle`` 为真且提供 ``execution_tables`` 时，在隔离副本上执行 Plan；
+    若 dry-run 失败或校验未通过，则在 ``messages`` 中追加反馈并重跑编排直至达到
+    ``MAX_AGENT_PREVIEW_REVISIONS``。
+
+    @param initial: 初始 Agent 状态。
+    @param preview_lifecycle: 是否启用预览就绪终端动作。
+    @param execution_tables: 用于 dry-run 的已提交表快照；缺省时保持 ``output_plan`` 行为。
+    @return: 终止状态与终端 ``AgentAction``。
+    """
     graph = get_compiled_agent_graph()
-    init: AgentGraphState = {
-        "agent": initial.model_dump(),
-        "scratch": {},
-    }
-    final = await graph.ainvoke(init)
-    agent_out = AgentState.model_validate(final["agent"])
-    ser = (final.get("scratch") or {}).get("ser_action")
-    if not ser:
-        log.error("orchestrator: missing ser_action in final state %s", final)
-        return (agent_out, FinishAction(FinishPayload(reason="internal_orchestrator_state")))
-    return (agent_out, _deserialize_terminal_action(ser))
+    working = initial
+    while True:
+        init: AgentGraphState = {
+            "agent": working.model_dump(),
+            "scratch": {},
+        }
+        final = await graph.ainvoke(init)
+        agent_out = AgentState.model_validate(final["agent"])
+        ser = (final.get("scratch") or {}).get("ser_action")
+        if not ser:
+            log.error("orchestrator: missing ser_action in final state %s", final)
+            return (
+                agent_out,
+                FinishAction(FinishPayload(reason="internal_orchestrator_state")),
+            )
+        action = _deserialize_terminal_action(ser)
+        k = action_kind(action)
+
+        if (
+            preview_lifecycle
+            and k == "output_plan"
+            and execution_tables is not None
+        ):
+            opa = cast(OutputPlanAction, action)
+            plan = opa.payload
+            preview_eval = evaluate_output_plan_preview(
+                agent_out, plan, execution_tables
+            )
+            if isinstance(preview_eval, PreviewEvaluationRevise):
+                working = preview_eval.working_agent
+                continue
+            if isinstance(preview_eval, PreviewEvaluationCap):
+                return (
+                    preview_eval.agent,
+                    FinishAction(
+                        FinishPayload(reason=preview_eval.finish_reason)
+                    ),
+                )
+            ready = cast(PreviewEvaluationReady, preview_eval)
+            return (
+                ready.agent,
+                PreviewReadyAction(
+                    PreviewReadyPayload(plan=ready.plan, preview=ready.record)
+                ),
+            )
+
+        return (agent_out, action)
 
 
 def _sse(event: str, data: dict) -> str:
@@ -187,11 +255,18 @@ def _sse(event: str, data: dict) -> str:
 
 async def stream_agent_events(
     state: AgentState,
+    *,
+    preview_lifecycle: bool = False,
+    execution_tables: Optional[Dict[str, TableData]] = None,
 ) -> AsyncIterator[str]:
     """SSE：事件名与 data 形态与原 `routes/agent` 中实现保持一致。
 
     在循环前执行与 `build_agent_graph` 一致的 context/intent 节点（MVP 透传），
     以便与 `run_agent_orchestrated` 的图入口对齐。
+
+    @param state: 初始 Agent 状态。
+    @param preview_lifecycle: 为真且提供 ``execution_tables`` 时，在 ``plan_done`` 之外额外发送 ``preview_ready``。
+    @param execution_tables: 与 ``run_agent_orchestrated`` 相同的 dry-run 表快照。
     """
     s = analyze_context(state)
     s = analyze_intent(s)
@@ -200,13 +275,41 @@ async def stream_agent_events(
             yield _sse("finish", {"reason": "max_turns", "state": s.to_dict()})
             return
 
-        s, action = await decision(s, use_tools=True)
+        s, action = await agent_react_step(s, use_tools=True)
         kind = action_kind(action)
 
         if kind == "output_plan":
+            plan_obj = action.payload
+            plan_dump = plan_to_wire_dict(plan_obj)
+            if preview_lifecycle and execution_tables is not None:
+                preview_eval = evaluate_output_plan_preview(
+                    s, plan_obj, execution_tables
+                )
+                if isinstance(preview_eval, PreviewEvaluationRevise):
+                    s = preview_eval.working_agent
+                    continue
+                if isinstance(preview_eval, PreviewEvaluationCap):
+                    yield _sse(
+                        "finish",
+                        {
+                            "reason": preview_eval.finish_reason,
+                            "state": preview_eval.agent.to_dict(),
+                        },
+                    )
+                    return
+                ready = cast(PreviewEvaluationReady, preview_eval)
+                s = ready.agent
+                yield _sse(
+                    "preview_ready",
+                    {
+                        "plan": plan_dump,
+                        "preview": preview_record_to_wire_dict(ready.record),
+                        "state": s.to_dict(),
+                    },
+                )
             yield _sse(
                 "plan_done",
-                {"plan": action.payload.model_dump(), "state": s.to_dict()},
+                {"plan": plan_dump, "state": s.to_dict()},
             )
             return
 
