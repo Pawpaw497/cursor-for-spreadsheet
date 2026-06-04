@@ -1,7 +1,11 @@
 """Plan 相关 Schema。"""
+from __future__ import annotations
+
 from typing import Any, Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from app.models.agent_models import PreviewRecord
 
 TransformKind = Literal["trim", "lower", "upper", "replace", "parse_date"]
 
@@ -221,6 +225,18 @@ class Plan(BaseModel):
     steps: List[Step] = Field(min_length=1)
 
 
+def plan_to_wire_dict(plan: Plan) -> Dict[str, Any]:
+    """Serialize Plan for browser / frontend Zod contract (``from``, ``as`` aliases)."""
+    return plan.model_dump(mode="json", by_alias=True)
+
+
+def preview_record_to_wire_dict(rec: PreviewRecord) -> Dict[str, Any]:
+    """Serialize PreviewRecord for HTTP/SSE; normalizes embedded ``plan`` to wire aliases."""
+    body = rec.model_dump()
+    body["plan"] = plan_to_wire_dict(Plan.model_validate(rec.plan))
+    return body
+
+
 class TableInfo(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
     name: str
@@ -253,13 +269,6 @@ class PlanResponse(BaseModel):
 class ConversationTurn(BaseModel):
     role: Literal["user", "assistant"]
     content: str
-
-
-class AgentProjectPlanRequest(ProjectPlanRequest):
-    """带历史与已应用计划摘要的 Agent 请求。"""
-
-    history: List[ConversationTurn] = Field(default_factory=list)
-    appliedPlansSummary: Optional[str] = None
 
 
 class ProjectPlanByIdRequest(BaseModel):
@@ -299,3 +308,20 @@ class ExecutePlanResponse(BaseModel):
     tables: Dict[str, ExecuteTable]
     diff: Dict[str, List[str]]
     newTables: List[str] = Field(default_factory=list)
+
+
+class AgentProjectPlanRequest(ProjectPlanRequest):
+    """带历史与已应用计划摘要的 Agent 请求。"""
+
+    history: List[ConversationTurn] = Field(default_factory=list)
+    appliedPlansSummary: Optional[str] = None
+    previewLifecycle: bool = False
+    previewDecision: Optional[Literal["confirm", "abort", "revise"]] = None
+    previewId: Optional[str] = None
+    revisionMessage: Optional[str] = None
+    projectId: Optional[str] = None
+    previewTables: Optional[List[ExecuteTable]] = None
+    previewHistory: List[PreviewRecord] = Field(default_factory=list)
+    revisionCount: int = 0
+    lastExecutionError: Optional[str] = None
+    commitPlan: Optional[Plan] = None

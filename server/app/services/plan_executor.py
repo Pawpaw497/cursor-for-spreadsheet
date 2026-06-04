@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from types import SimpleNamespace
 from typing import Any, Dict, List, Literal, Mapping, MutableMapping, Optional, Sequence
 
 from app.logging_config import get_logger
@@ -227,6 +226,15 @@ def _sort_rows(
     return non_none_rows + none_rows
 
 
+class RowExpr(dict):
+    """行表达式求值用的 row 包装：保留 dict 下标/get，并支持 ``row.列名`` 属性访问。"""
+
+    def __getattr__(self, name: str) -> Any:
+        if name in self:
+            return self[name]
+        raise AttributeError(name)
+
+
 def _safe_globals() -> Dict[str, Any]:
     """返回用于表达式执行的安全环境。"""
     # 仅暴露少量常用函数，避免滥用内置。
@@ -241,26 +249,39 @@ def _safe_globals() -> Dict[str, Any]:
     return {"__builtins__": {}, **allowed_builtins}
 
 
+def _js_logical_operators_to_python(body: str) -> str:
+    """将 LLM 常用的 JS 逻辑运算符转为 Python，与前端 ``new Function`` 预览语义对齐。
+
+    行级条件里极少在字符串字面量中出现 ``&&`` / ``||``；若后续需要可再做引号内保护。
+    """
+    body = re.sub(r"\s&&\s", " and ", body)
+    body = re.sub(r"\s\|\|\s", " or ", body)
+    body = re.sub(r"&&", " and ", body)
+    body = re.sub(r"\|\|", " or ", body)
+    return body
+
+
 def _normalize_row_expression(expression: str) -> str:
     """若 expression 为完整箭头形式 (row) => body 或 row => body，则只返回 body。
 
-    这样 lambda row: (body) 在 Python 中合法；且 body 中 row.列名 需配合
-    将 row 转为支持属性访问的对象（如 SimpleNamespace）使用。
+    这样 lambda row: (body) 在 Python 中合法；body 中的 row 使用 RowExpr，
+    同时支持 ``row.列名`` 与 ``row['列名']``。
     """
     m = re.match(r"^\s*(?:\(row\)|row)\s*=>\s*([\s\S]+)$", expression)
-    return m.group(1).strip() if m else expression
+    body = m.group(1).strip() if m else expression
+    return _js_logical_operators_to_python(body)
 
 
 def _eval_row_expression(expression: str, row: Mapping[str, Any]) -> Any:
     """在受限环境下对单行执行表达式，失败时返回 None（与前端 safeEval 类似）。
 
-    支持 LLM 返回的完整箭头 "row => row.列名..."；将 row 转为 SimpleNamespace
-    以便 row.列名 形式的属性访问在 Python 中可用。
+    支持 LLM 返回的完整箭头 "row => ..."；row 为 RowExpr，与前端一致地支持
+    ``row.列名``、``row['列名']`` 与 ``row.get(...)``。
     """
     try:
         body = _normalize_row_expression(expression)
         fn = eval(f"lambda row: ({body})", _safe_globals(), {})
-        row_obj = SimpleNamespace(**dict(row))
+        row_obj = RowExpr(dict(row))
         return fn(row_obj)
     except Exception:
         return None
