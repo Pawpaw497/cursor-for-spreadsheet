@@ -44,7 +44,7 @@
 
 - **AgentState**（`app/agent/state.py`）：显式状态（tables、messages、applied_plans_summary、conversation、current_turn、max_turns）。
 - **动作枚举**（`app/agent/actions.py`）：call_tool / output_plan / ask_clarification / finish，与 payload。
-- **decision + run_agent_loop**（`app/agent/decision.py`）：单步决策与循环，支持 use_tools，并内置基础澄清逻辑（多表未指定 table 时 ask_clarification）。
+- **pa_decision + run_agent_orchestrated**（`app/agent/pa_decision.py`, `orchestrator.py`）：Pydantic AI 单步决策与 LangGraph 循环，支持 tools 与多表澄清（`agent_helpers.maybe_need_clarification`）。
 - **工具集**（`app/services/tools.py`）：get_schema、get_sample_rows、get_column_stats、validate_expression；LLM 通过 tool calling 调用。
 - **LLM tool calling**（`app/services/llm.py`）：call_llm_with_tools（OpenRouter + Ollama），返回 content 或 tool_calls。
 
