@@ -1,0 +1,43 @@
+# Cursor for Spreadsheet — AI / indexing access control
+# Docs: https://cursor.com/docs/reference/ignore-file
+#
+# Cursor already honors .gitignore and built-in defaults (node_modules/, *.lock,
+# *.xlsx, .venv/, …). This file adds project-specific hard blocks.
+#
+# Softer “index only” exclusions: use .cursorindexingignore (same syntax).
+# All projects: Cursor Settings → indexing / global ignore patterns.
+
+# --- Secrets (also in .gitignore) ---
+.env
+.env.*
+!.env.example
+!server/.env.example
+server/.env
+py.env
+example.env
+
+# --- Local-only (not in repo; explicit if present) ---
+docs/local/
+scripts/
+.history/
+/env
+
+# --- Runtimes & caches ---
+server/.venv/
+.uv/
+client/node_modules/
+**/__pycache__/
+**/.pytest_cache/
+**/.ruff_cache/
+**/.mypy_cache/
+**/.vite/
+client/node_modules/.vite/
+
+# --- Sample binaries (use test-data/test-prompts.md + /api/load instead) ---
+test-data/*.xlsx
+
+# --- Optional LLM debug NDJSON when LLM_DEBUG_LOG_DIR is under repo root ---
+llm-debug/
+logs/llm/
+
+# Keep .cursor/rules, skills, and plans visible to Agent (do not ignore .cursor/)
