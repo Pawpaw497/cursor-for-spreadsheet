@@ -1,47 +1,32 @@
 ---
-description: 计划文件使用 Cursor 原生 todos（YAML：可勾选、可追踪）；正文列表仅可选同步
-alwaysApply: true
+description: Enforces frontmatter todos as the source of truth for Cursor plan files.
+globs: .cursor/plans/**/*.md
+alwaysApply: false
 ---
 
-# 计划：Cursor 格式 Todos
+# Cursor Plan Todo Rule
 
-制作 **Cursor plan**（`.cursor/plans/*.plan.md` 或对话里生成的计划）时，待办项 **必须以 frontmatter 的 `todos` 为真源**：
+When creating or updating `.cursor/plans/*.plan.md`, make YAML frontmatter `todos` the source of truth. Markdown task lists may mirror the YAML, but must not replace it.
 
-- **可勾选（checkable）**：在 Cursor 计划视图中以任务列表呈现，随 `status` 更新可勾选/完成态。
-- **可追踪（trackable）**：每条有稳定 `id`，便于在正文、PR、INDEX 中引用；`status` 为唯一进度真源（`pending` → `completed` 或 `cancelled`）。
-
-不要只用正文段落或**仅** Markdown 列表代替 YAML `todos`。
-
-## YAML 形状（必填）
+## Required Shape
 
 ```yaml
 ---
 name: short-kebab-name
-overview: 一句话说明目标与范围
+overview: One sentence describing goal and scope.
 isProject: false
 todos:
-  - id: unique-kebab-id
-    content: 可执行的一条说明（交付物或验证方式）
-    status: pending    # pending | completed | cancelled
+  - id: stable-kebab-id
+    content: One executable delivery or verification item.
+    status: pending
 ---
 ```
 
-- **`id`**：`kebab-case`，稳定、可引用；同一 plan 内不重复。
-- **`content`**：一条一事；避免「优化一下」类模糊句。
-- **`status`**：仅使用 `pending` / `completed` / `cancelled`（与 Cursor 计划一致）。
+## Rules
 
-## 正文（可选）
-
-- 需要人类可读摘要时，可加「执行清单」用 `- [ ]` 对照 YAML；**改状态时只改 YAML `status`**，再按需同步正文勾选，避免两套真源不一致。
-- 路线图/合集型 plan：大项仍用 YAML `todos`；拆出去的子工作另起独立 plan 文件。
-
-## 仓库内 `.cursor/plans/*.plan.md`
-
-- 优先级与「仍需完成」见 [INDEX.md](../plans/INDEX.md)（P1 → P3）。
-- 新建或修订 plan 时补齐 `name`、`overview`、`todos`；与 INDEX 中条目对应时保留既有 `id` 以免断档。
-
-```text
-❌ 只有正文 Markdown 列表，没有 YAML todos
-❌ YAML 里写 status: done 等非标准值
-✅ 完整 frontmatter todos + 标准 status；正文可有可无
-```
+- Use only `pending`, `completed`, or `cancelled` for `status`.
+- Keep each `id` stable, kebab-case, and unique within the plan.
+- Keep each `content` item specific enough to verify.
+- Update `status` in YAML first; sync mirrored Markdown checkboxes only when useful.
+- Preserve existing todo IDs referenced by `.cursor/plans/INDEX.md`.
+- Do not add plan files just to preserve chat output; only write them when explicitly requested.

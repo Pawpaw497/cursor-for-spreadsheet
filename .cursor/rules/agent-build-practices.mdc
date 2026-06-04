@@ -1,30 +1,30 @@
 ---
-description: Agent 与编排层沿用主流模式（多轮 LLM + 工具 + 状态），避免自研调度与“从头造轮子”
-globs: server/**/*.py
+description: Agent implementation rules for backend orchestration, tools, state, previews, and streaming APIs.
+globs: server/app/agent/**/*.py,server/app/api/routes/agent.py,server/app/models/agent_models.py,server/app/services/{llm,tools,agent_preview}.py,server/tests/test_agent*.py
 alwaysApply: false
 ---
 
-# Agent 构建：主流模式优先
+# Agent Implementation Rule
 
-在 `server` 中扩展与改造 Agent 时，**对齐行业常见的工具型 Agent 形态**（多轮对话、带 tools 的 LLM 调用、显式 state/actions），在既有骨架上增量演进，**不要**为 Demo 自研一套并行的“调度器 / 消息总线 / 新 DSL 运行时”。
+Extend the Agent as a tool-using, stateful workflow. Do not introduce a second scheduler, message bus, custom tool protocol, or standalone Agent runtime for this MVP.
 
-## 与当前仓库的落点
+## Architecture Map
 
-- 同步与流式 API 在 `app/api/routes/agent.py`；**单步决策**在 `app/agent/decision.py` 的 `decision`；**多轮与 LangGraph 编排**在 `app/agent/orchestrator.py`（`run_agent_orchestrated`；`run_agent_loop` 为同义别名，兼容旧名）。
-- 状态与动作：Pydantic / 结构化 `AgentState`、`AgentAction`（见 `app/agent/actions.py`）；工具规格与实现放在 `app/services/tools.py`，LLM 侧通过 `get_tools_spec_for_llm` 等与 OpenAI-兼容的 tools 协议衔接。
-- 新能力时优先：**加工具、补 prompt、在既有循环与校验里接好**，而不是新起一个独立 Agent 栈。
+- API surface: `app/api/routes/agent.py` for sync and streaming endpoints.
+- Decisions: `app/agent/pa_decision.py` + `app/agent/agent_helpers.py` (Pydantic AI single-step + shared turn helpers).
+- Orchestration: `app/agent/orchestrator.py` for LangGraph/multi-step flow.
+- State/actions: Pydantic models in `app/agent/state.py`, `app/agent/actions.py`, and `app/models/agent_models.py`.
+- LLM/tools/previews: `app/services/llm.py`, `app/services/tools.py`, and `app/services/agent_preview.py`.
 
-## 推荐做法
+## Implementation Rules
 
-- 参考 LangGraph / ReAct 等**已有范式的结构**来命名与拆分节点，若引入图编排，**沿用 LangGraph 的 StateGraph/compile/invoke 等官方用法**，与 `BaseAgent._build_graph` 等扩展点一致，而非手写图执行机。
-- 与 LLM 的交互**继续走** `app/services/llm.py`（含 tool_calls / 流式）**与现有 Message 形状**，避免同一套产品里并存多套互不兼容的 chat schema。
-- 需要“记忆/步骤上限/中止条件”时，在 **编排图节点、`decision` 与 `AgentState` 上显式加字段与分支**，而不是隐式全局变量。
-
-## 避免的做法
-
-- 从头实现通用 Agent 执行引擎、自研与 OpenAI tools 不兼容的 tool 协议、或为单一需求复制整条调用链到另一包名。
+- Add capabilities by extending tools, prompts, typed state, validation, or orchestration branches in the existing modules.
+- Keep stream events, tool schemas, abort behavior, and retry/error paths compatible with current callers.
+- Use LangGraph/ReAct-style structure when graph behavior changes; avoid handwritten graph execution loops.
+- Validate or clarify uncertain spreadsheet edits before generating destructive operations.
+- Keep frontend/backend message and preview contracts explicit in Pydantic/TypeScript types.
 
 ```text
-✅ 在 tools 中增加工具，并在 decision/循环中消费 tool 结果
-❌ 新建 package，自行维护另一套 "while True: llm → parse" 且不共享 state
+Good: add a tool and consume its result through existing decision/orchestration state.
+Bad: create a separate "while True: llm -> parse" Agent stack with its own message schema.
 ```

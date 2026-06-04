@@ -1,9 +1,11 @@
 ---
 name: product-brief-build-plan
-description: Reads docs/PRODUCT_BRIEF.md as the single source of truth, resolves blocking open questions, and produces a phased build plan with acceptance-linked verification. Use when the user updates the product brief, asks to build or plan from it, or wants milestone execution driven by docs/PRODUCT_BRIEF.md.
+description: Reads docs/PRODUCT_BRIEF.md as the milestone source for this personal project, resolves blocking open questions, and produces a phased build plan with acceptance-linked verification. Use when the user updates the brief, asks to build or plan from it, or wants milestone execution from docs/PRODUCT_BRIEF.md. Do not use docs/goals.md.
 ---
 
 # Build plan from `docs/PRODUCT_BRIEF.md`
+
+Personal project only: ignore `docs/goals.md` if mentioned elsewhere.
 
 ## When to apply
 
@@ -48,7 +50,7 @@ Emit a **Build plan** the user can paste into chat or keep in a PR. Use this str
 
 ### Doc / repo follow-up
 - [ ] **§8 Document changelog**: add row (date, author, summary) after the milestone ships.
-- [ ] `README` / `FEATURES.md` / `AGENT_IMPROVEMENTS.md` only if the workspace rules require a user-visible doc update for the change (do not expand docs beyond what the user or rules require).
+- [ ] `README.md` and relevant `.cursor/plans/*.plan.md` only if the workspace rules require a user-visible doc update for the change (do not expand docs beyond what the user or rules require).
 ```
 
 ## Execution rules (implementation)
