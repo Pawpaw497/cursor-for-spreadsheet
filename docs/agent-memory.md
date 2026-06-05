@@ -87,4 +87,13 @@ When server session APIs exist (Stage 6), this route may be deprecated or rename
 - Server injects it into the system prompt via `build_memory_context_block`.
 - Field mapping: request `appliedPlansSummary` → `AgentState.applied_plans_summary`.
 
-Later stages add unified `workspaceMemory.ts`, structured apply log, compaction, and optional server sync — without changing the injection-order contract above.
+Later stages add compaction and optional server sync — without changing the injection-order contract above.
+
+## Stage 2–3 (shipped in Week B)
+
+- **`workspaceMemory.ts`**: unified `localStorage` thread keyed by `workspaceKey` (not `serverBootId`); migrates legacy session chat + history apply records.
+- Chat + Agent `history` survive uvicorn restart; banner when `lastServerBootId` changes.
+- **`applyLog`**: structured entries on Apply/commit; rolling `appliedPlansSummary` built deterministically from log.
+- Cmd+K context strip: active table, grid selection hint, last apply summary.
+- Agent requests send `X-Session-ID` (`sessionMeta.sessionId`).
+- Server memory block includes preview lineage for aborted/revised previews.
