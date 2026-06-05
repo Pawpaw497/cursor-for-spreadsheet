@@ -152,6 +152,30 @@ def test_pa_decision_final_result_failed_not_empty_response() -> None:
     asyncio.run(run())
 
 
+def test_pa_decision_coerces_json_string_tool_args() -> None:
+    state = _state()
+
+    async def run() -> None:
+        turn = _turn_tools(
+            ToolCallPart(
+                tool_name="validate_expression",
+                args='{"expression": "row[\'a\']"}',
+                tool_call_id="tc1",
+            )
+        )
+        with patch(
+            "app.agent.pa_decision._run_pa_single_turn",
+            return_value=turn,
+        ), patch("app.services.tools.run_tool") as m_run:
+            _, action = await pa_decision_step(state, use_tools=True)
+            assert isinstance(action, CallToolAction)
+            assert action.payload.tool_name == "validate_expression"
+            assert action.payload.tool_args["expression"] == "row['a']"
+            m_run.assert_not_called()
+
+    asyncio.run(run())
+
+
 def test_pa_decision_invalid_tool_args_retries() -> None:
     state = _state(max_turns=5)
     calls = 0
@@ -194,6 +218,42 @@ def test_pa_decision_clarification_multi_table() -> None:
         ):
             _, action = await pa_decision_step(state, use_tools=True)
             assert isinstance(action, AskClarificationAction)
+
+    asyncio.run(run())
+
+
+def test_pa_decision_clarification_ambiguous_column() -> None:
+    """sort_table on duplicate column name without table triggers clarification."""
+    plan = Plan.model_validate(
+        {
+            "intent": "sort",
+            "steps": [
+                {
+                    "action": "sort_table",
+                    "column": "price",
+                    "order": "ascending",
+                }
+            ],
+        }
+    )
+    schema = [{"key": "price", "type": "number"}]
+    state = AgentState(
+        tables=[
+            TableContext(name="Sheet1", schema=schema, sample_rows=[{"price": 1}]),
+            TableContext(name="Sheet2", schema=schema, sample_rows=[{"price": 2}]),
+        ],
+        messages=[],
+        user_prompt="sort price",
+    )
+
+    async def run() -> None:
+        with patch(
+            "app.agent.pa_decision._run_pa_single_turn",
+            return_value=_turn_plan(plan),
+        ):
+            _, action = await pa_decision_step(state, use_tools=True)
+            assert isinstance(action, AskClarificationAction)
+            assert "multiple tables" in action.payload.question.lower()
 
     asyncio.run(run())
 

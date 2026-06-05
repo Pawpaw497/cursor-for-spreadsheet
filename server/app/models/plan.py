@@ -310,9 +310,27 @@ class ExecutePlanResponse(BaseModel):
     newTables: List[str] = Field(default_factory=list)
 
 
+class SelectedRange(BaseModel):
+    """AG Grid selection sent from the browser (0-based row indices)."""
+
+    startRow: int
+    endRow: int
+    colIds: List[str] = Field(default_factory=list)
+
+
+class AgentRequestContext(BaseModel):
+    """Optional spreadsheet `@`-style context attached to an Agent request."""
+
+    activeTable: Optional[str] = None
+    selectedRange: Optional[SelectedRange] = None
+    focusedColumn: Optional[str] = None
+    workspaceRules: Optional[str] = None
+
+
 class AgentProjectPlanRequest(ProjectPlanRequest):
     """带历史与已应用计划摘要的 Agent 请求。"""
 
+    context: Optional[AgentRequestContext] = None
     history: List[ConversationTurn] = Field(default_factory=list)
     appliedPlansSummary: Optional[str] = None
     previewLifecycle: bool = False
@@ -325,3 +343,5 @@ class AgentProjectPlanRequest(ProjectPlanRequest):
     revisionCount: int = 0
     lastExecutionError: Optional[str] = None
     commitPlan: Optional[Plan] = None
+    clarificationReply: Optional[str] = None
+    clarificationTurnId: Optional[str] = None

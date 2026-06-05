@@ -21,11 +21,8 @@ from app.agent.actions import (
     FinishPayload,
     OutputPlanAction,
 )
-from app.agent.agent_helpers import (
-    maybe_need_clarification,
-    state_after_turn,
-    state_with_user_feedback,
-)
+from app.agent.agent_helpers import state_after_turn, state_with_user_feedback
+from app.agent.clarification import maybe_need_clarification
 from app.agent.pa_state import (
     build_pa_message_history,
     system_instructions_for_state,
@@ -36,6 +33,7 @@ from app.agent.pa_tools import (
     PaAgentDeps,
     register_pa_agent_tools,
 )
+from app.agent.tool_call_args import coerce_tool_call_args
 from app.agent.state import AgentState
 from app.config import settings
 from app.logging_config import get_logger
@@ -390,13 +388,13 @@ async def pa_decision_step(
         tc = turn.tool_parts[0]
         tool_name = tc.tool_name or ""
         tool_call_id = tc.tool_call_id
-        args = tc.args
-        if not isinstance(args, dict):
+        args = coerce_tool_call_args(tool_name, tc.args)
+        if args is None:
             log.warning(
-                "pa_decision tool arguments not object tool=%s id=%s type=%s",
+                "pa_decision tool arguments invalid tool=%s id=%s raw_type=%s",
                 tool_name,
                 tool_call_id,
-                type(args).__name__,
+                type(tc.args).__name__,
             )
             if state.current_turn + 1 >= state.max_turns:
                 return (
@@ -408,8 +406,10 @@ async def pa_decision_step(
                     ),
                 )
             feedback = (
-                f"Tool call {tool_name!r} had invalid arguments (expected JSON object). "
-                "Respond with a tool call whose arguments are a single valid JSON object."
+                f"Tool call {tool_name!r} had invalid arguments. "
+                "Use a single JSON object with the required fields from the tool schema; "
+                "for validate_expression use exact column keys from the user message "
+                '(e.g. {"expression": "row[\'单价\'] * row[\'数量\']"}).'
             )
             retry_state = state_with_user_feedback(state, feedback)
             return await pa_decision_step(retry_state, use_tools=use_tools)

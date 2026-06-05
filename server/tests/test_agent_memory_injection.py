@@ -32,6 +32,31 @@ def test_build_memory_context_block_renders_summary() -> None:
     assert "Added column total = price * qty" in block
 
 
+def test_build_memory_context_block_renders_preview_lineage() -> None:
+    from app.models.agent_models import PreviewRecord
+
+    state = AgentState(
+        tables=[_table()],
+        messages=[],
+        user_prompt="follow up",
+        preview_history=[
+            PreviewRecord(
+                id="pv1",
+                plan={"intent": "Join A and B"},
+                diff={"added_columns": [], "modified_columns": [], "removed_columns": []},
+                status="aborted",
+                user_decision="abort",
+                user_decision_reason="wrong key",
+                created_at=1.0,
+            )
+        ],
+    )
+    block = build_memory_context_block(state)
+    assert "Preview lineage:" in block
+    assert "Aborted preview Join A and B" in block
+    assert "wrong key" in block
+
+
 def test_system_instructions_include_applied_summary() -> None:
     state = AgentState(
         tables=[_table()],

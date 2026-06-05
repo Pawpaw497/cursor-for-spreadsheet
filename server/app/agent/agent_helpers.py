@@ -3,14 +3,18 @@ from __future__ import annotations
 
 import json
 
-from app.agent.actions import (
-    AskClarificationAction,
-    CallToolAction,
-    ClarificationPayload,
-)
+from app.agent.actions import CallToolAction
+from app.agent.clarification import maybe_need_clarification
 from app.agent.state import AgentState
 from app.agent.user_context import build_initial_user_message
-from app.models.plan import Plan
+
+# Re-export for tests and legacy imports.
+__all__ = [
+    "maybe_need_clarification",
+    "run_tool_and_append_messages",
+    "state_after_turn",
+    "state_with_user_feedback",
+]
 
 
 def state_after_turn(state: AgentState) -> AgentState:
@@ -43,45 +47,6 @@ def state_with_user_feedback(state: AgentState, feedback: str) -> AgentState:
             "messages": base_messages + [{"role": "user", "content": feedback}],
         }
     )
-
-
-def maybe_need_clarification(
-    state: AgentState,
-    plan: Plan,
-) -> AskClarificationAction | None:
-    """Multi-table: ask when add_column/transform_column steps omit ``table``."""
-    table_names = [t.name for t in state.tables]
-    if len(table_names) <= 1:
-        return None
-
-    ambiguous_steps: list[str] = []
-    for idx, step in enumerate(plan.steps):
-        action = getattr(step, "action", None)
-        table = getattr(step, "table", None)
-        if action in ("add_column", "transform_column") and not table:
-            desc = f"#{idx}: {action}"
-            col = getattr(step, "column", None) or getattr(step, "name", None)
-            if col:
-                desc += f" on {col}"
-            ambiguous_steps.append(desc)
-
-    if not ambiguous_steps:
-        return None
-
-    question = (
-        "Multiple tables detected, but some steps do not specify which table "
-        "to apply to. Which table should these steps target?"
-    )
-    context = (
-        "Ambiguous steps:\n- " + "\n- ".join(ambiguous_steps)
-        + "\nAvailable tables: " + ", ".join(table_names)
-    )
-    payload = ClarificationPayload(
-        question=question,
-        options=table_names,
-        context=context,
-    )
-    return AskClarificationAction(payload=payload)
 
 
 def run_tool_and_append_messages(

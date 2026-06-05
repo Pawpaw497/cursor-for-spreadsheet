@@ -36,11 +36,12 @@ Each Agent / plan request assembles LLM input in this order:
 
 1. **System** — spreadsheet rules (`SpreadsheetPrompt` / `ProjectPrompt`)
 2. **Memory block** — `appliedPlansSummary` (+ later: last N apply-log lines, pinned notes)
-3. **Table context user message** — schema + sample rows for current prompt
-4. **Transcript** — prior user/assistant (and tool) turns from `state.messages` / `history`
-5. **Current prompt** — user's latest natural-language request
+3. **Selection / context user snippet** — active table, grid selection, focused column, optional workspace rules (Stage 4)
+4. **Table context user message** — schema + sample rows for current prompt
+5. **Transcript** — prior user/assistant (and tool) turns from `state.messages` / `history`
+6. **Current prompt** — user's latest natural-language request
 
-Backend helper: `build_memory_context_block()` in `server/app/agent/memory_context.py`. Wired into PA `system_instructions_for_state` and legacy `_build_messages_dict_from_state`.
+Backend helpers: `build_memory_context_block()` in `server/app/agent/memory_context.py`; `assemble_agent_context()` in `server/app/agent/context_assembler.py`. Wired into PA `system_instructions_for_state`, `initial_state_from_agent_project_request`, and legacy `_build_messages_dict_from_state`.
 
 ---
 
@@ -87,4 +88,20 @@ When server session APIs exist (Stage 6), this route may be deprecated or rename
 - Server injects it into the system prompt via `build_memory_context_block`.
 - Field mapping: request `appliedPlansSummary` → `AgentState.applied_plans_summary`.
 
-Later stages add unified `workspaceMemory.ts`, structured apply log, compaction, and optional server sync — without changing the injection-order contract above.
+Later stages add compaction and optional server sync — without changing the injection-order contract above.
+
+## Stage 2–3 (shipped in Week B)
+
+- **`workspaceMemory.ts`**: unified `localStorage` thread keyed by `workspaceKey` (not `serverBootId`); migrates legacy session chat + history apply records.
+- Chat + Agent `history` survive uvicorn restart; banner when `lastServerBootId` changes.
+- **`applyLog`**: structured entries on Apply/commit; rolling `appliedPlansSummary` built deterministically from log.
+- Cmd+K context strip: active table, grid selection hint, last apply summary.
+- Agent requests send `X-Session-ID` (`sessionMeta.sessionId`).
+- Server memory block includes preview lineage for aborted/revised previews.
+
+## Stage 4 (context assembler)
+
+- **`context_assembler.py`**: `assemble_agent_context(state)` returns an `AgentContextPackage` with tables, selection, workspace rules, memory block, and transcript summary.
+- **Request field** `context` on `AgentProjectPlanRequest`: optional `activeTable`, `selectedRange`, `focusedColumn`, `workspaceRules`.
+- **Client**: AI panel workspace rules textarea persisted to `localStorage` key `spreadsheet-cursor:rules:<workspaceKey>`; grid selection/focus sent on each Agent call via `buildAgentRequestContext`.
+- **Injection**: selection + rules render as a dedicated user snippet **before** the table-context user message on the current turn.
