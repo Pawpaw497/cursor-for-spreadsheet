@@ -45,7 +45,10 @@ class GetColumnStatsArgs(BaseModel):
 
 class ValidateExpressionArgs(BaseModel):
     expression: str = Field(
-        description="Expression to evaluate, e.g. row.price * row.quantity."
+        description=(
+            "JavaScript expression as (row) => expr; use exact schema column keys "
+            "from the user message, e.g. row['单价'] * row['数量']."
+        )
     )
     table_name: str | None = Field(
         default=None,
@@ -98,7 +101,8 @@ PA_TOOL_DEFINITIONS: tuple[PaToolDefinition, ...] = (
         name="validate_expression",
         description=(
             "Validate a JavaScript-like expression (e.g. for add_column) against "
-            "the first sample row. (row) => <expr>."
+            "the first sample row. Arguments must be a JSON object with "
+            '"expression" using exact column keys from schema (not English aliases).'
         ),
         args_model=ValidateExpressionArgs,
     ),
