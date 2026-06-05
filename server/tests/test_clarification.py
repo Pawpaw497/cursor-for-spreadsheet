@@ -4,7 +4,7 @@ from __future__ import annotations
 from app.agent.actions import AskClarificationAction
 from app.agent.clarification import maybe_need_clarification
 from app.models.agent_models import AgentState, TableContext
-from app.models.plan import Plan
+from app.models.plan import AgentRequestContext, Plan, SelectedRange
 
 
 def _two_table_state() -> AgentState:
@@ -82,6 +82,66 @@ def test_no_clarify_single_table() -> None:
         ],
         messages=[],
         user_prompt="sort",
+    )
+    plan = Plan.model_validate(
+        {
+            "intent": "sort",
+            "steps": [
+                {"action": "sort_table", "column": "price", "order": "ascending"}
+            ],
+        }
+    )
+    assert maybe_need_clarification(state, plan) is None
+
+
+def test_skip_missing_table_clarify_when_active_table_in_context() -> None:
+    state = _two_table_state()
+    state.request_context = AgentRequestContext(activeTable="Sheet1")
+    plan = Plan.model_validate(
+        {
+            "intent": "add",
+            "steps": [{"action": "add_column", "name": "x", "expression": "1"}],
+        }
+    )
+    assert maybe_need_clarification(state, plan) is None
+
+
+def test_skip_ambiguous_column_when_active_table_hosts_column() -> None:
+    state = _two_table_state()
+    state.request_context = AgentRequestContext(activeTable="Sheet2")
+    plan = Plan.model_validate(
+        {
+            "intent": "sort",
+            "steps": [
+                {"action": "sort_table", "column": "price", "order": "ascending"}
+            ],
+        }
+    )
+    assert maybe_need_clarification(state, plan) is None
+
+
+def test_skip_ambiguous_column_when_focused_column_matches() -> None:
+    state = _two_table_state()
+    state.request_context = AgentRequestContext(
+        activeTable="Sheet1",
+        focusedColumn="price",
+    )
+    plan = Plan.model_validate(
+        {
+            "intent": "sort",
+            "steps": [
+                {"action": "sort_table", "column": "price", "order": "ascending"}
+            ],
+        }
+    )
+    assert maybe_need_clarification(state, plan) is None
+
+
+def test_skip_ambiguous_column_when_single_selected_column_matches() -> None:
+    state = _two_table_state()
+    state.request_context = AgentRequestContext(
+        activeTable="Sheet1",
+        selectedRange=SelectedRange(startRow=0, endRow=2, colIds=["price"]),
     )
     plan = Plan.model_validate(
         {

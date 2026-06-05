@@ -28,7 +28,6 @@ import {
   type AgentClarificationHistoryPayload
 } from "./agentStream";
 import {
-  buildClarificationResumeHistory,
   truncatePromptAnchor,
   type PendingClarification,
   type PendingClarificationSource
@@ -38,8 +37,9 @@ import {
   debouncedSaveWorkspaceMemory,
   flushDebouncedWorkspaceMemorySave,
   appendApplyLogEntry,
-  buildAgentHistoryFromTranscript,
-  chatToAgentTranscript,
+  appendClarificationAnswerToTranscript,
+  appendClarificationQuestionToTranscript,
+  buildAgentHistoryForRequest,
   createApplyLogEntry,
   emptyWorkspaceMemory,
   formatLastApplyHint,
@@ -770,7 +770,7 @@ export default function App() {
   }, [diff, newTablesPreview]);
 
   function chatMessagesToAgentHistory(): { role: "user" | "assistant"; content: string }[] {
-    return buildAgentHistoryFromTranscript(chatToAgentTranscript(chatMessages));
+    return buildAgentHistoryForRequest(workspaceMemoryRef.current, chatMessages);
   }
 
   function recordAppliedPlan(plan: Plan, promptText?: string, diffSnapshot: Diff | null = diff) {
@@ -964,6 +964,14 @@ export default function App() {
       source
     });
     appendClarificationChatMessage(clarification);
+    workspaceMemoryRef.current = appendClarificationQuestionToTranscript(
+      workspaceMemoryRef.current,
+      clarification.question,
+      clarification.context
+    );
+    if (activeWorkspaceKey) {
+      debouncedSaveWorkspaceMemory(activeWorkspaceKey, workspaceMemoryRef.current);
+    }
     setStatus(
       `需要澄清：${clarification.question}` +
         (clarification.options?.length
@@ -1005,17 +1013,19 @@ export default function App() {
 
     const traceId = generateTraceId();
     appendClarificationUserMessage(trimmed);
+    workspaceMemoryRef.current = appendClarificationAnswerToTranscript(
+      workspaceMemoryRef.current,
+      trimmed
+    );
+    if (activeWorkspaceKey) {
+      debouncedSaveWorkspaceMemory(activeWorkspaceKey, workspaceMemoryRef.current);
+    }
     setPrompt("");
     setStatus(modelSource === "cloud" ? "Calling cloud LLM…" : "Calling local LLM…");
 
-    const filtered = chatMessages.filter(
-      (m) => m.role === "user" || m.role === "assistant"
-    );
-    const resumeHistory = buildClarificationResumeHistory(
-      chatToAgentTranscript(filtered.slice(0, -1)),
-      pending.question,
-      pending.context,
-      trimmed
+    const resumeHistory = buildAgentHistoryForRequest(
+      workspaceMemoryRef.current,
+      chatMessages
     );
 
     try {

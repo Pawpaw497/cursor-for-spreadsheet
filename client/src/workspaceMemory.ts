@@ -212,23 +212,46 @@ export function chatToAgentTranscript(chat: ChatMessage[]): AgentTurn[] {
     });
 }
 
+export function appendClarificationQuestionToTranscript(
+  memory: WorkspaceMemory,
+  question: string,
+  context: string | null | undefined
+): WorkspaceMemory {
+  return {
+    ...memory,
+    agentTranscript: truncateAgentTranscript([
+      ...memory.agentTranscript,
+      {
+        role: "assistant",
+        content: formatClarificationAssistantContent(question, context)
+      }
+    ])
+  };
+}
+
+export function appendClarificationAnswerToTranscript(
+  memory: WorkspaceMemory,
+  answer: string
+): WorkspaceMemory {
+  return {
+    ...memory,
+    agentTranscript: truncateAgentTranscript([
+      ...memory.agentTranscript,
+      { role: "user", content: answer }
+    ])
+  };
+}
+
 export function appendClarificationToTranscript(
   memory: WorkspaceMemory,
   question: string,
   context: string | null | undefined,
   answer: string
 ): WorkspaceMemory {
-  const turns: AgentTurn[] = [
-    {
-      role: "assistant",
-      content: formatClarificationAssistantContent(question, context)
-    },
-    { role: "user", content: answer }
-  ];
-  return {
-    ...memory,
-    agentTranscript: truncateAgentTranscript([...memory.agentTranscript, ...turns])
-  };
+  return appendClarificationAnswerToTranscript(
+    appendClarificationQuestionToTranscript(memory, question, context),
+    answer
+  );
 }
 
 export function buildAgentHistoryFromTranscript(
@@ -236,6 +259,17 @@ export function buildAgentHistoryFromTranscript(
   maxTurns = 24
 ): AgentTurn[] {
   return agentTranscript.slice(-maxTurns);
+}
+
+export function buildAgentHistoryForRequest(
+  memory: WorkspaceMemory,
+  chatMessages: ChatMessage[],
+  maxTurns = 24
+): AgentTurn[] {
+  if (memory.agentTranscript.length > 0) {
+    return buildAgentHistoryFromTranscript(memory.agentTranscript, maxTurns);
+  }
+  return buildAgentHistoryFromTranscript(chatToAgentTranscript(chatMessages), maxTurns);
 }
 
 function conversationToApplyLogEntry(conv: StoredConversationEntry): AppliedPlanEntry | null {
@@ -423,10 +457,23 @@ export function syncAgentTranscriptFromChat(
   memory: WorkspaceMemory,
   chatTranscript: ChatMessage[]
 ): WorkspaceMemory {
+  if (memory.agentTranscript.length === 0) {
+    return {
+      ...memory,
+      chatTranscript,
+      agentTranscript: chatToAgentTranscript(chatTranscript)
+    };
+  }
+  const prevLen = memory.chatTranscript.length;
+  const newChatTail = chatTranscript.length > prevLen ? chatTranscript.slice(prevLen) : [];
+  const newTurns = chatToAgentTranscript(newChatTail);
   return {
     ...memory,
     chatTranscript,
-    agentTranscript: chatToAgentTranscript(chatTranscript)
+    agentTranscript:
+      newTurns.length > 0
+        ? truncateAgentTranscript([...memory.agentTranscript, ...newTurns])
+        : memory.agentTranscript
   };
 }
 

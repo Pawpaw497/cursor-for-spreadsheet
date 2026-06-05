@@ -1,9 +1,11 @@
 """Deterministic clarification gates after Plan validation."""
 from __future__ import annotations
 
+from typing import Any
+
 from app.agent.actions import AskClarificationAction, ClarificationPayload
 from app.agent.state import AgentState
-from app.models.plan import Plan
+from app.models.plan import AgentRequestContext, Plan
 
 _WRITE_ACTIONS = frozenset({"add_column", "transform_column"})
 _COLUMN_REF_FIELDS: dict[str, str] = {
@@ -18,6 +20,84 @@ _COLUMN_REF_FIELDS: dict[str, str] = {
 
 def _table_names(state: AgentState) -> list[str]:
     return [t.name for t in state.tables]
+
+
+def _request_context(state: AgentState) -> AgentRequestContext | Any | None:
+    return state.request_context
+
+
+def _context_target_table(state: AgentState) -> str | None:
+    ctx = _request_context(state)
+    if ctx is None:
+        return None
+    if isinstance(ctx, AgentRequestContext):
+        return ctx.activeTable
+    active = getattr(ctx, "activeTable", None)
+    if isinstance(active, str) and active.strip():
+        return active.strip()
+    if isinstance(ctx, dict):
+        raw = ctx.get("activeTable")
+        if isinstance(raw, str) and raw.strip():
+            return raw.strip()
+    return None
+
+
+def _context_target_column(state: AgentState) -> str | None:
+    ctx = _request_context(state)
+    if ctx is None:
+        return None
+    if isinstance(ctx, AgentRequestContext):
+        return ctx.focusedColumn
+    focused = getattr(ctx, "focusedColumn", None)
+    if isinstance(focused, str) and focused.strip():
+        return focused.strip()
+    if isinstance(ctx, dict):
+        raw = ctx.get("focusedColumn")
+        if isinstance(raw, str) and raw.strip():
+            return raw.strip()
+    return None
+
+
+def _context_selected_col_ids(state: AgentState) -> list[str]:
+    ctx = _request_context(state)
+    if ctx is None:
+        return []
+    selected = (
+        ctx.selectedRange
+        if isinstance(ctx, AgentRequestContext)
+        else getattr(ctx, "selectedRange", None)
+    )
+    if selected is None and isinstance(ctx, dict):
+        selected = ctx.get("selectedRange")
+    if selected is None:
+        return []
+    col_ids = (
+        selected.colIds
+        if hasattr(selected, "colIds")
+        else selected.get("colIds") if isinstance(selected, dict) else None
+    )
+    if not col_ids:
+        return []
+    return [str(c) for c in col_ids]
+
+
+def _context_disambiguates_column_step(state: AgentState, col: str) -> bool:
+    """Selection context resolves an ambiguous column ref for one plan step."""
+    active_table = _context_target_table(state)
+    if not active_table:
+        return False
+
+    col_key = str(col)
+    hosts = _column_to_tables(state).get(col_key, [])
+    if active_table in hosts:
+        return True
+
+    focused = _context_target_column(state)
+    if focused == col_key:
+        return True
+
+    selected_cols = _context_selected_col_ids(state)
+    return len(selected_cols) == 1 and selected_cols[0] == col_key
 
 
 def _column_to_tables(state: AgentState) -> dict[str, list[str]]:
@@ -39,6 +119,8 @@ def _clarify_missing_table_on_write_steps(
     """Multi-table: ask when add_column/transform_column steps omit ``table``."""
     table_names = _table_names(state)
     if len(table_names) <= 1:
+        return None
+    if _context_target_table(state):
         return None
 
     ambiguous_steps: list[str] = []
@@ -99,6 +181,8 @@ def _clarify_ambiguous_column_ref(
             continue
         hosts = col_map.get(str(col), [])
         if len(hosts) < 2:
+            continue
+        if _context_disambiguates_column_step(state, str(col)):
             continue
         ambiguous_steps.append(f"#{idx}: {action} on column {col}")
         option_tables.update(hosts)

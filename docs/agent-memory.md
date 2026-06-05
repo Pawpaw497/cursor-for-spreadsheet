@@ -105,3 +105,9 @@ Later stages add compaction and optional server sync — without changing the in
 - **Request field** `context` on `AgentProjectPlanRequest`: optional `activeTable`, `selectedRange`, `focusedColumn`, `workspaceRules`.
 - **Client**: AI panel workspace rules textarea persisted to `localStorage` key `spreadsheet-cursor:rules:<workspaceKey>`; grid selection/focus sent on each Agent call via `buildAgentRequestContext`.
 - **Injection**: selection + rules render as a dedicated user snippet **before** the table-context user message on the current turn.
+
+## Clarification Phase 3 (agent transcript + selection-aware gates)
+
+- **`buildAgentHistoryForRequest`**: Agent `history` prefers persisted `workspaceMemory.agentTranscript` (includes `[Clarification]` Q/A formatting); falls back to chat-derived transcript only when `agentTranscript` is empty.
+- **Clarification persistence**: `receiveAgentClarification` / `submitClarificationAnswer` append formatted Q and A turns to `agentTranscript` directly; `syncAgentTranscriptFromChat` is append-only when a transcript already exists so clarification turns are not dropped.
+- **Selection-aware clarification skip**: `maybe_need_clarification` reads `state.request_context`; when `activeTable` (and matching `focusedColumn` or single-column `selectedRange`) disambiguates multi-table column refs or write steps missing `table`, deterministic clarification is skipped.
