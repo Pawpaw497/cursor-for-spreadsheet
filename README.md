@@ -59,7 +59,7 @@ flowchart LR
 ### 已实现（MVP）
 1. **Cmd+K「AI 编辑」弹窗**：在任意表格中按下 `Cmd+K`，会展开右侧 AI 面板（若已折叠）并聚焦多行输入框；面板最右侧为纵向图标栏，可在 **AI 对话**、**Schema**、**历史对话** 等视图间切换。
 2. **单表计划**（`/api/plan`）：LLM 生成结构化 JSON 计划，前后端共享同一套步骤语义，包括但不限于：
-   - 列级操作：`add_column`（新增派生列，支持 `row => row.price * row.quantity` 形式表达式）、`transform_column`（trim / lower / upper / replace / parse_date）、`rename_column`、`delete_column`、`reorder_columns`、`cast_column_type` 等。
+   - 列级操作：`add_column`（新增派生列，支持 `row => row['单价'] * row['数量']` 形式表达式，列名须与 schema 一致）、`transform_column`（trim / lower / upper / replace / parse_date）、`rename_column`、`delete_column`、`reorder_columns`、`cast_column_type` 等。
    - 行级操作：`filter_rows`、`delete_rows`、`deduplicate_rows`、`sort_table`、`fill_missing`（按常数 / 均值 / 中位数 / 众数填充缺失值）等。
 3. **多表 / 项目计划**（`/api/plan-project`）：在单表能力基础上，支持典型的多表场景：
    - `join_tables`：按主键/外键进行 inner / left / right join，产出新表。
@@ -84,6 +84,11 @@ flowchart LR
 7. **Agent 模式（实验性）**：
    - 后端提供 `/api/agent`：基于同一份多表上下文，使用多轮 LLM + 工具（schema / 样本 / 列统计 / 表达式校验等）生成计划，并在遇到歧义时返回「澄清问题」而不是直接执行。
    - 提供 `/api/agent-stream`（SSE）：以流式事件（`tool_call` / `tool_result` / `plan_done` / `finish` / `clarification`）推送 Agent 执行过程，便于前端实时展示「模型在做什么」。
+   - **Agent 澄清（clarification）**：
+     - **何时触发（当前）**：多表项目且 Plan 含 `add_column` 或 `transform_column` 步骤但未带 `table` 字段时，由规则 `maybe_need_clarification`（`server/app/agent/agent_helpers.py`）在 Plan 产出后拦截并返回澄清，**非** LLM 原生追问。
+     - **响应形状**：`kind: "clarification"`，正文含 `clarification.question`、`clarification.options`（常为表名列表）、`clarification.context`；**无** `plan`（字段为 `null` 或省略）。
+     - **交互约定（Phase 1 前端）**：用户应**回答澄清**（点选 `options` 或简短回复），而不是把整条 Cmd+K 指令重写一遍；续跑时前端会保留原 `prompt` 并把澄清 Q/A 写入 `history` 再调 `/api/agent`。
+     - **计划与测试**：实现路线图见 [`.cursor/plans/agent-clarification-loop.plan.md`](.cursor/plans/agent-clarification-loop.plan.md)；HTTP 映射回归见 `server/tests/test_agent_clarification_route.py`。Cursor 式选项 chips UI 属 Phase 1，尚未落地。
 8. **多表 Agent 预览生命周期（可选 `previewLifecycle`）**：
    - **多表 / 项目模式**下，「Generate Plan」走 `/api/agent`，请求体带 `previewLifecycle: true`；有 `projectId` 时服务端从 `ProjectState` 克隆表做 dry-run，无 `projectId` 时需同时传 `previewTables`（全量行）以便服务端在副本上执行计划。
    - 无 `projectId` 时，`previewTables` 每张表最多 **5000** 行：超出部分在前端序列化与后端 `execution_tables_from_execute_tables` 中截断并记 warning，避免超大 JSON 触发反代 body 限制或内存尖峰（常量：`client` 的 `PREVIEW_TABLES_MAX_ROWS_PER_TABLE` 与后端 `PREVIEW_TABLES_MAX_ROWS_PER_TABLE` 须保持一致）。
@@ -220,10 +225,11 @@ npm run dev
 4. 在 **AI 对话** 视图中：
    - 在「云端 / 本地」开关中选择当前希望使用的模型来源；
    - 在下拉框中选择具体模型（例如云端「Gemini Lite（经济）」或「Claude 3.5（标准）」，或本地的 `qwen2.5:7b`）。
-5. 输入自然语言指令，例如：
-   - `Add a column total_price = price * quantity`
-   - `Transform column email to lowercase`
-   - `Join Sheet1 and Orders on name and customer`
+5. 输入自然语言指令（与 load-sample 示例表列名一致），例如：
+   - `在销售订单表新增金额列 = 数量 * 单价`
+   - `清洗销售订单的客户列首尾空格，并将订单日期解析为日期`
+   - `从产品信息 lookup 类别到销售订单（产品 ↔ 产品名称）`
+   - 更多已验证示例见 [`test-data/test-prompts.md`](test-data/test-prompts.md)
 6. 点击 `Generate Plan`，等待几秒：
    - 右侧 **AI 对话** 气泡中会出现你刚才的指令，以及一条由系统自动生成的 Plan 摘要回复；
    - 主表格会展示 dry-run 后的预览数据（含新建表 tab）；相关列以绿色/黄色高亮；
@@ -293,14 +299,12 @@ npm run dev
 
 ## 示例提示词
 
-以下是几条可以直接复制到 Chat 输入框中的**英文示例指令**（均为祈使句、无结尾句号，首词大写动词）：
+以下示例与 **`/api/load-sample`** 加载的 [`test-data/sample.xlsx`](test-data/sample.xlsx) 列名一致（工作表：`销售订单`、`产品信息`、`部门预算`）。完整场景见 [`test-data/test-prompts.md`](test-data/test-prompts.md)。
 
-- `Add a column total_price = price * quantity`
-- `Transform column email to lowercase`
-- `Trim whitespace in column name`
-- `Replace "-" with "" in column phone`
-- `Parse column signup_date as date`
-- `Join Sheet1 and Orders on name and customer`
+- 在`销售订单`表：将`数量`、`单价`转为数值；新增`金额`=`数量 * 单价`；只保留`订单日期`在 2024 年的行；按`金额`降序排序
+- 在`销售订单`表：清洗`客户`列首尾空格；将`订单日期`解析为日期；按`订单号`去重保留首行
+- 在`部门预算`表：新增`使用率`=`已使用 / 年度预算`；新增`预算状态`（紧张/正常/宽松）；按`使用率`降序排序
+- 基于`销售订单`和`产品信息`：按`产品`与`产品名称` lookup `类别`、`成本价`；在订单表新增`金额`和`毛利`；创建`按类别汇总`并聚合销量与销售额
 
 ---
 

@@ -13,10 +13,10 @@ todos:
     status: completed
   - id: stage-2-workspace-memory
     content: Add client/workspaceMemory.ts; localStorage keyed by workspaceKey; migrate sessionStorage chat
-    status: pending
+    status: completed
   - id: stage-3-apply-log
     content: applyLog + rolling summary on Apply/commit; Cmd+K context strip from last apply
-    status: pending
+    status: completed
   - id: stage-4-context-assembler
     content: AgentProjectPlanRequest.context + selection/workspace rules; assemble_agent_context server-side
     status: pending
