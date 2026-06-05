@@ -349,6 +349,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  margin-bottom: 12px;
 }
 
 .panel-section:last-child {
@@ -397,6 +398,72 @@ textarea {
   width: 100%;
   flex-shrink: 0;
   min-width: 0;
+}
+
+.prompt-compose--clarification-pending {
+  border: 1px solid #c9daf8;
+  border-radius: 8px;
+  padding: 8px;
+  background: #f8fbff;
+}
+
+.clarification-prompt-anchor {
+  color: #555;
+  font-size: 12px;
+  line-height: 1.4;
+  margin-bottom: 2px;
+}
+
+.clarification-bubble {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.clarification-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.clarification-chip {
+  border: 1px solid #0066cc;
+  background: #eef5ff;
+  color: #004999;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.clarification-chip:hover {
+  background: #dbeaff;
+}
+
+.clarification-context {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.clarification-context-toggle {
+  align-self: flex-start;
+  border: none;
+  background: none;
+  color: #0066cc;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+}
+
+.clarification-context-body {
+  margin: 0;
+  padding: 8px;
+  background: #f5f5f5;
+  border-radius: 6px;
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow-x: auto;
 }
 
 .prompt-input-wrap {
@@ -558,7 +625,7 @@ pre {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  max-height: 260px;
+  margin-bottom: 8px;
   overflow: auto;
 }
 
@@ -616,6 +683,22 @@ pre {
 
 .chat-empty-hint {
   color: #888;
+}
+
+.backend-restart-banner {
+  margin-bottom: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: #fff8e6;
+  color: #7a5b00;
+  border: 1px solid #f0e0b0;
+}
+
+.cmdk-context-strip {
+  color: #555;
+  padding: 4px 2px 0;
+  line-height: 1.35;
+  border-top: 1px solid #eee;
 }
 
 .chat-message-row {

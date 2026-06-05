@@ -1,22 +1,41 @@
 # Client-side storage
 
-The UI persists three classes of data in the browser. All are **plaintext** on the user’s machine; do not use on shared devices with sensitive spreadsheets.
+The UI persists data in the browser. All are **plaintext** on the user’s machine; do not use on shared devices with sensitive spreadsheets.
 
-## Chat bubbles (`sessionStorage`)
+## Workspace memory (`localStorage`) — primary chat thread
+
+**Module**: `client/src/workspaceMemory.ts`
+
+| Item | Value |
+|------|--------|
+| Key pattern | `spreadsheet-cursor:memory:v1:<workspaceKey>` |
+| Scope | Per workspace (same key as technical history) |
+| Lifetime | Survives refresh **and backend restart** |
+
+Unified fields:
+
+| Field | Purpose |
+|-------|---------|
+| `chatTranscript` | AI chat bubbles |
+| `agentTranscript` | User/assistant turns sent as Agent `history` |
+| `applyLog` | Compact record per successful Apply / commit |
+| `previewHistory` | Mirror of API `previewHistory` |
+| `sessionMeta.sessionId` | Stable UUID per workspace → `X-Session-ID` on Agent calls |
+| `sessionMeta.lastServerBootId` | Detect backend restart (shows restore banner) |
+
+On first load, migrates once from legacy `sessionStorage` chat keys and recent workspace history into `applyLog`.
+
+Saves are debounced (500 ms).
+
+## Legacy chat bubbles (`sessionStorage`) — migrated
 
 **Module**: `client/src/backendSessionChatStorage.ts`
 
 | Item | Value |
 |------|--------|
 | Key pattern | `spreadsheet-cursor:chat:<serverBootId>:<workspaceKey>` |
-| Scope | Current browser tab session |
-| Lifetime | Until tab close, or backend restart (new `serverBootId`) |
 
-`serverBootId` comes from `/health` and `/api/config`. After **uvicorn restart**, chat keys no longer match and bubbles appear empty.
-
-`ChatMessage.sessionId` aligns with `serverBootId`.
-
-Saves are debounced (500 ms).
+Used only for **one-time migration** into `workspaceMemory` when v1 memory is empty. New sessions no longer write here from `App.tsx`.
 
 ## Technical history (`localStorage`)
 
@@ -59,9 +78,10 @@ This is separate from per-conversation `modelTag` in workspace history (which re
 
 | Panel | Storage |
 |-------|---------|
-| AI chat (bubbles) | sessionStorage + `serverBootId` |
-| History (technical view) | localStorage + workspace key |
-| Model picker (cloud/local + model) | localStorage (global) |
+| AI chat (bubbles) | `workspaceMemory` (`localStorage` per workspace) |
+| History (technical view) | `workspaceHistoryStorage` (`localStorage` per workspace) |
+| Model picker (cloud/local + model) | `modelPreferenceStorage` (global) |
+| Apply memory / Agent summary | `workspaceMemory.applyLog` → `appliedPlansSummary` on API |
 
 ## Related server concepts
 

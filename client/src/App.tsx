@@ -21,12 +21,30 @@ import {
   uploadProjectFile
 } from "./llm";
 import type { ChatMessage, ConfigResponse, ModelOption } from "./llm";
+import { ClarificationBubble } from "./ClarificationBubble";
+import {
+  buildClarificationResumeHistory,
+  buildClarificationResumePrompt,
+  truncatePromptAnchor,
+  type PendingClarification,
+  type PendingClarificationSource
+} from "./clarification";
 import { generateTraceId, getSessionId, logError, logInfo } from "./logger";
 import {
-  debouncedSaveBackendSessionChat,
-  flushDebouncedBackendSessionChatSave,
-  loadBackendSessionChat
-} from "./backendSessionChatStorage";
+  debouncedSaveWorkspaceMemory,
+  flushDebouncedWorkspaceMemorySave,
+  appendApplyLogEntry,
+  buildAgentHistoryFromTranscript,
+  chatToAgentTranscript,
+  createApplyLogEntry,
+  emptyWorkspaceMemory,
+  formatLastApplyHint,
+  loadWorkspaceMemory,
+  syncAgentTranscriptFromChat,
+  updateSessionBootId,
+  type AppliedPlanEntry,
+  type WorkspaceMemory
+} from "./workspaceMemory";
 import {
   loadModelPreference,
   resolveModelPreference,
@@ -278,11 +296,19 @@ export default function App() {
   const [importError, setImportError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [pendingClarification, setPendingClarification] = useState<PendingClarification | null>(
+    null
+  );
+  const [applyLog, setApplyLog] = useState<AppliedPlanEntry[]>([]);
+  const [workspaceSessionId, setWorkspaceSessionId] = useState<string | null>(null);
+  const [showBackendRestartBanner, setShowBackendRestartBanner] = useState(false);
+  const [gridSelectionSummary, setGridSelectionSummary] = useState<string | null>(null);
   const [activeWorkspaceKey, setActiveWorkspaceKey] = useState<string | null>(null);
   const [serverBootId, setServerBootId] = useState<string | null>(null);
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
+  const skipMemorySaveRef = useRef(false);
+  const workspaceMemoryRef = useRef<WorkspaceMemory>(emptyWorkspaceMemory());
   const skipWorkspaceSaveRef = useRef(false);
-  const skipChatSaveRef = useRef(false);
   const diffPreviewLoggedRef = useRef(false);
   const lastAgentPlanPromptRef = useRef("");
   const agentLlmAbortRef = useRef<AbortController | null>(null);
@@ -318,27 +344,41 @@ export default function App() {
     [resolveModelLabel]
   );
 
-  const hydrateWorkspaceChat = useCallback(
+  const hydrateWorkspaceMemory = useCallback(
     (workspaceKey: string, bootId: string | null) => {
+      const memory = loadWorkspaceMemory(workspaceKey, bootId);
       const cached = loadWorkspaceHistory(workspaceKey);
+      skipMemorySaveRef.current = true;
       skipWorkspaceSaveRef.current = true;
-      skipChatSaveRef.current = true;
       setConversations((cached?.conversations ?? []) as ConversationEntry[]);
-      setChatMessages(
-        bootId ? loadBackendSessionChat(bootId, workspaceKey) : []
+      setChatMessages(memory.chatTranscript);
+      setAppliedPlansSummary(memory.appliedPlansSummary);
+      setAgentPreviewHistory(memory.previewHistory);
+      setApplyLog(memory.applyLog);
+      setWorkspaceSessionId(memory.sessionMeta.sessionId);
+      setShowBackendRestartBanner(
+        !!(
+          bootId &&
+          memory.sessionMeta.lastServerBootId &&
+          memory.sessionMeta.lastServerBootId !== bootId &&
+          memory.chatTranscript.length > 0
+        )
       );
+      workspaceMemoryRef.current = bootId
+        ? updateSessionBootId(memory, bootId)
+        : memory;
     },
     []
   );
 
   const activateWorkspace = useCallback(
     (workspaceKey: string) => {
-      flushDebouncedBackendSessionChatSave();
+      flushDebouncedWorkspaceMemorySave();
       flushDebouncedWorkspaceHistorySave();
       setActiveWorkspaceKey(workspaceKey);
-      hydrateWorkspaceChat(workspaceKey, serverBootId);
+      hydrateWorkspaceMemory(workspaceKey, serverBootId);
     },
-    [hydrateWorkspaceChat, serverBootId]
+    [hydrateWorkspaceMemory, serverBootId]
   );
 
   const loadSampleTables = useCallback(async () => {
@@ -564,9 +604,48 @@ export default function App() {
     if (!serverBootId || !activeWorkspaceKey) {
       return;
     }
-    skipChatSaveRef.current = true;
-    setChatMessages(loadBackendSessionChat(serverBootId, activeWorkspaceKey));
+    const memory = workspaceMemoryRef.current;
+    const prevBoot = memory.sessionMeta.lastServerBootId;
+    if (prevBoot && prevBoot !== serverBootId && memory.chatTranscript.length > 0) {
+      setShowBackendRestartBanner(true);
+    }
+    workspaceMemoryRef.current = updateSessionBootId(memory, serverBootId);
   }, [serverBootId, activeWorkspaceKey]);
+
+  useEffect(() => {
+    if (!activeWorkspaceKey) {
+      return;
+    }
+    if (skipMemorySaveRef.current) {
+      skipMemorySaveRef.current = false;
+      return;
+    }
+    const updated = syncAgentTranscriptFromChat(
+      {
+        ...workspaceMemoryRef.current,
+        appliedPlansSummary,
+        previewHistory: agentPreviewHistory,
+        applyLog
+      },
+      chatMessages
+    );
+    updated.sessionMeta = {
+      ...updated.sessionMeta,
+      lastServerBootId: serverBootId ?? updated.sessionMeta.lastServerBootId
+    };
+    workspaceMemoryRef.current = updated;
+    debouncedSaveWorkspaceMemory(activeWorkspaceKey, updated);
+    return () => {
+      flushDebouncedWorkspaceMemorySave();
+    };
+  }, [
+    activeWorkspaceKey,
+    chatMessages,
+    appliedPlansSummary,
+    agentPreviewHistory,
+    applyLog,
+    serverBootId
+  ]);
 
   useEffect(() => {
     if (!activeWorkspaceKey) {
@@ -581,20 +660,6 @@ export default function App() {
       flushDebouncedWorkspaceHistorySave();
     };
   }, [activeWorkspaceKey, conversations]);
-
-  useEffect(() => {
-    if (!activeWorkspaceKey || !serverBootId) {
-      return;
-    }
-    if (skipChatSaveRef.current) {
-      skipChatSaveRef.current = false;
-      return;
-    }
-    debouncedSaveBackendSessionChat(serverBootId, activeWorkspaceKey, chatMessages);
-    return () => {
-      flushDebouncedBackendSessionChatSave();
-    };
-  }, [activeWorkspaceKey, serverBootId, chatMessages]);
 
   const toggleResponseExpanded = useCallback((id: number) => {
     setExpandedResponseIds((prev) => {
@@ -684,10 +749,22 @@ export default function App() {
   }, [diff, newTablesPreview]);
 
   function chatMessagesToAgentHistory(): { role: "user" | "assistant"; content: string }[] {
-    return chatMessages
-      .filter((m) => m.role === "user" || m.role === "assistant")
-      .slice(-24)
-      .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }));
+    return buildAgentHistoryFromTranscript(chatToAgentTranscript(chatMessages));
+  }
+
+  function recordAppliedPlan(plan: Plan, promptText?: string, diffSnapshot: Diff | null = diff) {
+    const activeModelId = modelSource === "cloud" ? cloudModelId : localModelId;
+    const entry = createApplyLogEntry({
+      prompt: promptText?.trim() || "",
+      plan,
+      diff: diffSnapshot,
+      modelTag: buildModelTag(modelSource, activeModelId),
+      tableNames: Object.keys(tables)
+    });
+    const next = appendApplyLogEntry(workspaceMemoryRef.current, entry);
+    workspaceMemoryRef.current = next;
+    setApplyLog(next.applyLog);
+    setAppliedPlansSummary(next.appliedPlansSummary);
   }
 
   function summarizePlanForChat(p: Plan | null): string {
@@ -749,19 +826,6 @@ export default function App() {
     return lines.join("\n");
   }
 
-  function appendToAppliedPlansSummary(plan: Plan, promptText?: string) {
-    const entry = summarizePlanForChat(plan);
-    if (!entry.trim()) return;
-    const block = promptText?.trim()
-      ? `Prompt: ${promptText.trim()}\n${entry}`
-      : entry;
-    setAppliedPlansSummary((prev) => {
-      const parts = prev ? prev.split("\n---\n").filter(Boolean) : [];
-      parts.push(block);
-      return parts.slice(-3).join("\n---\n");
-    });
-  }
-
   function appendChatMessagesFromPlan(promptText: string, nextPlan: Plan | null) {
     if (!promptText) {
       return;
@@ -802,7 +866,221 @@ export default function App() {
     setChatMessages((prev) => [...prev, userMessage, assistantMessage]);
   }
 
+  function appendClarificationChatMessage(clarification: {
+    question: string;
+    options?: string[] | null;
+    context?: string | null;
+  }) {
+    const chatSessionId = serverBootId ?? "unknown";
+    const now = new Date();
+    const activeModelId = modelSource === "cloud" ? cloudModelId : localModelId;
+    const modelTag = buildModelTag(modelSource, activeModelId);
+    const assistantMessage: ChatMessage = {
+      id: `live-${chatSessionId}-${now.getTime()}-assistant-clarify`,
+      sessionId: chatSessionId,
+      role: "assistant",
+      content: clarification.question,
+      createdAt: now.toISOString(),
+      projectId: projectId ?? undefined,
+      source: "live",
+      meta: {
+        kind: "clarification",
+        options: clarification.options ?? undefined,
+        context: clarification.context ?? undefined,
+        modelSource,
+        modelId: activeModelId,
+        modelTag
+      }
+    };
+    setChatMessages((prev) => [...prev, assistantMessage]);
+  }
+
+  function appendClarificationUserMessage(answer: string) {
+    const chatSessionId = serverBootId ?? "unknown";
+    const now = new Date();
+    const activeModelId = modelSource === "cloud" ? cloudModelId : localModelId;
+    const modelTag = buildModelTag(modelSource, activeModelId);
+    const userMessage: ChatMessage = {
+      id: `live-${chatSessionId}-${now.getTime()}-user-clarify`,
+      sessionId: chatSessionId,
+      role: "user",
+      content: answer,
+      createdAt: now.toISOString(),
+      projectId: projectId ?? undefined,
+      source: "live",
+      meta: {
+        kind: "clarification_answer",
+        modelSource,
+        modelId: activeModelId,
+        modelTag
+      }
+    };
+    setChatMessages((prev) => [...prev, userMessage]);
+  }
+
+  function receiveAgentClarification(
+    clarification: {
+      question: string;
+      options?: string[] | null;
+      context?: string | null;
+    },
+    originalPrompt: string,
+    traceId: string,
+    source: PendingClarificationSource
+  ) {
+    setPlan(null);
+    setDiff(null);
+    setNewTablesPreview([]);
+    if (source === "generate") {
+      setPendingServerPreviewId(null);
+    }
+    setPendingClarification({
+      question: clarification.question,
+      options: clarification.options,
+      context: clarification.context,
+      originalPrompt,
+      traceId,
+      source
+    });
+    appendClarificationChatMessage(clarification);
+    setStatus(
+      `需要澄清：${clarification.question}` +
+        (clarification.options?.length
+          ? ` 选项：${clarification.options.join(" / ")}`
+          : "")
+    );
+    setPrompt("");
+    logInfo("plan_response", {
+      traceId,
+      success: true,
+      stepsCount: 0,
+      mode: "agent_clarification"
+    });
+  }
+
+  async function submitClarificationAnswer(answer: string) {
+    const pending = pendingClarification;
+    if (!pending) {
+      return;
+    }
+    const trimmed = answer.trim();
+    if (!trimmed) {
+      setStatus("请先选择上方选项，或在输入框中填写表名/简短回答。");
+      return;
+    }
+
+    const traceId = generateTraceId();
+    appendClarificationUserMessage(trimmed);
+    setPrompt("");
+    setStatus(modelSource === "cloud" ? "Calling cloud LLM…" : "Calling local LLM…");
+
+    const filtered = chatMessages.filter(
+      (m) => m.role === "user" || m.role === "assistant"
+    );
+    const resumeHistory = buildClarificationResumeHistory(
+      chatToAgentTranscript(filtered.slice(0, -1)),
+      pending.question,
+      pending.context,
+      trimmed
+    );
+    const resumePrompt = buildClarificationResumePrompt(pending.originalPrompt, trimmed);
+
+    try {
+      const tablesArr = Object.values(tables);
+      const usingProjectApi = !!projectId;
+      const agentRes = await requestAgentProjectPlan({
+        prompt: resumePrompt,
+        tables: tablesArr,
+        modelSource,
+        cloudModelId: modelSource === "cloud" ? cloudModelId : undefined,
+        localModelId: modelSource === "local" ? localModelId : undefined,
+        traceId,
+        sessionId: workspaceSessionId ?? undefined,
+        history: resumeHistory,
+        appliedPlansSummary,
+        previewLifecycle: true,
+        projectId: usingProjectApi ? projectId : undefined,
+        previewTables: usingProjectApi ? undefined : tablesArr,
+        previewHistory: agentPreviewHistory,
+        revisionCount: agentRevisionCount,
+        signal: takeAgentLlmAbortSignal()
+      });
+
+      if (agentRes.kind === "clarification") {
+        receiveAgentClarification(
+          agentRes.clarification,
+          pending.originalPrompt,
+          traceId,
+          pending.source
+        );
+        return;
+      }
+
+      setPendingClarification(null);
+
+      if (agentRes.kind === "plan") {
+        const nextPlan = agentRes.plan;
+        setPendingServerPreviewId(null);
+        setPlan(nextPlan);
+        logInfo("plan_response", {
+          traceId,
+          success: true,
+          stepsCount: nextPlan.steps.length,
+          mode: "agent_clarification_resolved_plan"
+        });
+        const preview = applyProjectPlan(tables, nextPlan);
+        setDiff(preview.diff);
+        setNewTablesPreview(preview.newTables);
+        appendChatMessagesFromPlan(resumePrompt, nextPlan);
+        setStatus("Plan generated. Review Diff, then Apply.");
+        return;
+      }
+
+      if (agentRes.kind === "preview_ready") {
+        const nextPlan = agentRes.plan;
+        const localPreview = applyProjectPlan(tables, nextPlan);
+        setPlan(nextPlan);
+        setDiff(agentRes.preview.diff ?? localPreview.diff);
+        setNewTablesPreview(
+          agentRes.preview.newTables.length > 0
+            ? agentRes.preview.newTables
+            : localPreview.newTables
+        );
+        setAgentPreviewHistory(agentRes.previewHistory);
+        setPendingServerPreviewId(agentRes.preview.id);
+        const st = agentRes.state;
+        const rc = Number(st.revision_count ?? st.revisionCount ?? 0);
+        setAgentRevisionCount(Number.isFinite(rc) ? rc : 0);
+        logInfo("plan_response", {
+          traceId,
+          success: true,
+          stepsCount: nextPlan.steps.length,
+          mode: "agent_clarification_resolved_preview"
+        });
+        appendChatMessagesFromPlan(resumePrompt, nextPlan);
+        setStatus("服务器预览已就绪：Apply 写回、Abort 放弃预览，或输入修订说明后点 Revise。");
+        return;
+      }
+
+      setStatus("Unexpected agent response after clarification.");
+    } catch (e: unknown) {
+      const msg = String((e as Error)?.message ?? e);
+      const { technical } = splitApiErrorDetail(msg);
+      logError("clarification_resume_error", {
+        traceId,
+        message: msg,
+        ...(technical ? { technicalDetail: technical } : {})
+      });
+      setStatus(statusFromErrorMessage(msg));
+    }
+  }
+
   async function onGenerate() {
+    if (pendingClarification) {
+      await submitClarificationAnswer(prompt.trim());
+      return;
+    }
+
     const traceId = generateTraceId();
     const modelId = modelSource === "cloud" ? cloudModelId : localModelId;
     logInfo("cmdk_prompt_submit", {
@@ -846,6 +1124,7 @@ export default function App() {
           cloudModelId: modelSource === "cloud" ? cloudModelId : undefined,
           localModelId: modelSource === "local" ? localModelId : undefined,
           traceId,
+          sessionId: workspaceSessionId ?? undefined,
           history: chatMessagesToAgentHistory(),
           appliedPlansSummary,
           previewLifecycle: true,
@@ -856,22 +1135,7 @@ export default function App() {
           signal: takeAgentLlmAbortSignal()
         });
         if (agentRes.kind === "clarification") {
-          setPlan(null);
-          setDiff(null);
-          setNewTablesPreview([]);
-          setPendingServerPreviewId(null);
-          setStatus(
-            `需要澄清：${agentRes.clarification.question}` +
-              (agentRes.clarification.options?.length
-                ? ` 选项：${agentRes.clarification.options.join(" / ")}`
-                : "")
-          );
-          logInfo("plan_response", {
-            traceId,
-            success: true,
-            stepsCount: 0,
-            mode: "agent_clarification"
-          });
+          receiveAgentClarification(agentRes.clarification, prompt, traceId, "generate");
           return;
         }
         if (agentRes.kind === "plan") {
@@ -1045,6 +1309,7 @@ export default function App() {
             cloudModelId: modelSource === "cloud" ? cloudModelId : undefined,
             localModelId: modelSource === "local" ? localModelId : undefined,
             traceId,
+            sessionId: workspaceSessionId ?? undefined,
             history: chatMessagesToAgentHistory(),
             appliedPlansSummary,
             previewLifecycle: true,
@@ -1061,7 +1326,11 @@ export default function App() {
             setStatus("确认失败：服务器未返回 committed。");
             return;
           }
-          appendToAppliedPlansSummary(plan, lastAgentPlanPromptRef.current || prompt);
+          recordAppliedPlan(
+            plan,
+            lastAgentPlanPromptRef.current || prompt,
+            res.executeResult.diff
+          );
           setTables(res.executeResult.tables);
           if (res.executeResult.newTables.length > 0) {
             setActiveTable(res.executeResult.newTables[0]!);
@@ -1089,7 +1358,7 @@ export default function App() {
               traceId
             })
           : await executePlanOnServer({ tables, plan, traceId });
-        appendToAppliedPlansSummary(plan, lastAgentPlanPromptRef.current || prompt);
+        recordAppliedPlan(plan, lastAgentPlanPromptRef.current || prompt, result.diff);
         setTables(result.tables);
         if (result.newTables.length > 0) {
           setActiveTable(result.newTables[0]);
@@ -1124,6 +1393,7 @@ export default function App() {
         cloudModelId: modelSource === "cloud" ? cloudModelId : undefined,
         localModelId: modelSource === "local" ? localModelId : undefined,
         traceId,
+        sessionId: workspaceSessionId ?? undefined,
         history: chatMessagesToAgentHistory(),
         appliedPlansSummary,
         previewLifecycle: true,
@@ -1172,6 +1442,7 @@ export default function App() {
         cloudModelId: modelSource === "cloud" ? cloudModelId : undefined,
         localModelId: modelSource === "local" ? localModelId : undefined,
         traceId,
+        sessionId: workspaceSessionId ?? undefined,
         history: chatMessagesToAgentHistory(),
         appliedPlansSummary,
         previewLifecycle: true,
@@ -1214,7 +1485,12 @@ export default function App() {
         return;
       }
       if (agentRes.kind === "clarification") {
-        setStatus(`需要澄清：${agentRes.clarification.question}`);
+        receiveAgentClarification(
+          agentRes.clarification,
+          lastAgentPlanPromptRef.current || prompt,
+          traceId,
+          "preview_revise"
+        );
         return;
       }
       setStatus("修订响应异常。");
@@ -1368,9 +1644,11 @@ export default function App() {
     }
   }
 
-  const placeholder = isProjectMode
-    ? 'e.g. "Join Sheet1 and Orders on name and customer" or "Add column total to Sheet1"'
-    : 'Try: "Add a column total_price = price * quantity"';
+  const placeholder = pendingClarification
+    ? "选择上方选项，或输入表名/简短回答（不必重写整条指令）"
+    : isProjectMode
+      ? '例：从产品信息 lookup 类别到销售订单（产品 ↔ 产品名称）'
+      : '试：在销售订单表新增金额 = 数量 * 单价';
 
   const renderJsonPreview = (
     value: unknown,
@@ -1604,6 +1882,22 @@ export default function App() {
               onGridReady={(e) => {
                 gridRef.current = e.api;
               }}
+              onSelectionChanged={(e) => {
+                const selectedCount = e.api.getSelectedNodes().length;
+                if (selectedCount > 0) {
+                  setGridSelectionSummary(`已选 ${selectedCount} 行`);
+                  return;
+                }
+                const focused = e.api.getFocusedCell();
+                if (focused?.column) {
+                  const colId = focused.column.getColId();
+                  if (colId && colId !== "__rowNum") {
+                    setGridSelectionSummary(`列 ${colId}`);
+                    return;
+                  }
+                }
+                setGridSelectionSummary(null);
+              }}
               onCellValueChanged={(e) => {
                 if (isPreviewMode || !currentTable) return;
                 const idx = e.rowIndex!;
@@ -1646,10 +1940,15 @@ export default function App() {
                     项目模式：可对多张表进行 join / create_table 等操作
                   </div>
                 )}
+                {showBackendRestartBanner && (
+                  <div className="backend-restart-banner small">
+                    后端已重启；对话已从工作区本地记忆恢复。
+                  </div>
+                )}
                 <div className="chat-history-container" ref={chatScrollRef}>
                   {chatMessages.length === 0 && (
                     <div className="small chat-empty-hint">
-                      暂无对话，可在下方输入指令开始与 AI 交互（仅保留本次启动后端期间的记录）。
+                      暂无对话，可在下方输入指令开始与 AI 交互（按工作区保存在浏览器中，后端重启后仍可恢复）。
                     </div>
                   )}
                   {chatMessages.map((msg) => (
@@ -1676,7 +1975,26 @@ export default function App() {
                             <span className="chat-tag">历史</span>
                           )}
                         </div>
-                        <div className="chat-content">{msg.content || "(空)"}</div>
+                        <div className="chat-content">
+                          {msg.meta?.kind === "clarification" ? (
+                            <ClarificationBubble
+                              question={msg.content}
+                              options={
+                                Array.isArray(msg.meta.options)
+                                  ? (msg.meta.options as string[])
+                                  : undefined
+                              }
+                              context={
+                                typeof msg.meta.context === "string"
+                                  ? msg.meta.context
+                                  : undefined
+                              }
+                              onSelectOption={submitClarificationAnswer}
+                            />
+                          ) : (
+                            msg.content || "(空)"
+                          )}
+                        </div>
                       </div>
                     </div>
                   ))}
@@ -1728,7 +2046,23 @@ export default function App() {
                       </select>
                     )}
                   </div>
-                  <div className="prompt-compose">
+                  <div className="cmdk-context-strip small" aria-label="Cmd+K context">
+                    <span>表: {activeTable}</span>
+                    {gridSelectionSummary ? <span> · {gridSelectionSummary}</span> : null}
+                    {applyLog[0] ? (
+                      <span> · 上次 Apply: {formatLastApplyHint(applyLog[0])}</span>
+                    ) : null}
+                  </div>
+                  <div
+                    className={`prompt-compose${
+                      pendingClarification ? " prompt-compose--clarification-pending" : ""
+                    }`}
+                  >
+                    {pendingClarification && (
+                      <div className="clarification-prompt-anchor small">
+                        原指令：{truncatePromptAnchor(pendingClarification.originalPrompt)}
+                      </div>
+                    )}
                     <div className="prompt-input-wrap">
                       <textarea
                         ref={promptRef}
@@ -1744,7 +2078,7 @@ export default function App() {
                         className="btn primary prompt-generate-btn"
                         onClick={onGenerate}
                       >
-                        Generate Plan
+                        {pendingClarification ? "继续生成" : "Generate Plan"}
                       </button>
                     </div>
                   </div>

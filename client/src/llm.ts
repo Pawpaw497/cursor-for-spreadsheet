@@ -296,6 +296,8 @@ export const PREVIEW_TABLES_MAX_ROWS_PER_TABLE = 5000;
 type FetchLogOptions = {
   /** 用于控制台与后端对齐的请求关联 ID。 */
   traceId?: string;
+  /** 工作区会话 ID（``WorkspaceMemory.sessionMeta.sessionId``），对应请求头 X-Session-ID。 */
+  sessionId?: string;
   /** 业务操作名，如 request_plan。 */
   operation: string;
 };
@@ -393,6 +395,10 @@ async function fetchWithTimeout(
   const headers = new Headers(restInit.headers);
   if (!headers.has("X-Request-ID")) {
     headers.set("X-Request-ID", traceId);
+  }
+  const sessionId = logOptions?.sessionId?.trim();
+  if (sessionId && !headers.has("X-Session-ID")) {
+    headers.set("X-Session-ID", sessionId);
   }
 
   logInfo("request_start", { operation, path, traceId, method });
@@ -633,6 +639,7 @@ export async function requestAgentProjectPlan(opts: {
   cloudModelId?: string;
   localModelId?: string;
   traceId?: string;
+  sessionId?: string;
   history?: { role: "user" | "assistant"; content: string }[];
   appliedPlansSummary?: string;
   previewLifecycle?: boolean;
@@ -710,7 +717,11 @@ export async function requestAgentProjectPlan(opts: {
       signal: opts.signal
     },
     getLlmClientTimeoutMs(),
-    { operation: "request_agent_project_plan", traceId: opts.traceId }
+    {
+      operation: "request_agent_project_plan",
+      traceId: opts.traceId,
+      sessionId: opts.sessionId
+    }
   );
   if (!resp.ok) {
     const txt = await resp.text();
