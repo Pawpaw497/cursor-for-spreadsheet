@@ -22,6 +22,14 @@ server/data/
 scripts/
 docs/local/
 
+# 前端依赖与构建产物（勿提交；若曾被跟踪：git rm -r --cached client/node_modules）
+client/node_modules/
+client/dist/
+
+# 本机调试日志（LLM NDJSON 等，见 README）
+logs/
+llm-debug/
+
 # =============================================================================
 # Python — https://github.com/github/gitignore/blob/main/Python.gitignore
 # =============================================================================
