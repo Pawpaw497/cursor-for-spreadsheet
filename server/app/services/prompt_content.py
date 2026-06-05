@@ -97,7 +97,8 @@ _SPREADSHEET_RULES = (
     "\n\nRules:\n"
     "- add_column.expression is a JavaScript expression evaluated as "
     "(row) => expression\n"
-    "- Use row.<columnName> to access values\n"
+    "- Use row.<columnName> with exact schema column keys from the user message "
+    "(do not invent English aliases when columns are localized)\n"
     '- transform_column.replace args: {"from": string, "to": string}\n'
     '- transform_column.parse_date args: {"formatHint"?: string}\n'
     "- sort_table: "
@@ -132,7 +133,7 @@ _PROJECT_RULES = (
     '- "table" in steps that have optional table: target table name; '
     "omit if only one table (add_column, transform_column, sort_table, etc.).\n"
     "- add_column.expression: JavaScript (row) => expression; "
-    "use row.<col> for values.\n"
+    "use row.<col> for values with exact keys from each table schema.\n"
     "- transform_column.replace args: "
     '{"from": string, "to": string}; '
     'parse_date args: {"formatHint"?: string}\n'
