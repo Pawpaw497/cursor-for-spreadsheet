@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import type { WorkspaceMemory } from "./workspaceMemory";
-import { mergeWorkspaceMemory, workspaceMemoryIsEmpty } from "./sessionMemorySync";
+import {
+  applyServerSyncMeta,
+  mergeWorkspaceMemory,
+  workspaceMemoryIsEmpty
+} from "./sessionMemorySync";
 
 function memory(partial: Partial<WorkspaceMemory> & Pick<WorkspaceMemory, "sessionMeta">): WorkspaceMemory {
   return {
@@ -125,5 +129,22 @@ describe("sessionMemorySync", () => {
         })
       )
     ).toBe(true);
+  });
+
+  it("applyServerSyncMeta stores version fields", () => {
+    const sessionId = "00000000-0000-4000-8000-000000000004";
+    const base = memory({
+      sessionMeta: {
+        sessionId,
+        lastServerBootId: null,
+        schemaFingerprint: null
+      }
+    });
+    const updated = applyServerSyncMeta(base, {
+      version: 3,
+      updatedAt: "2026-06-06T00:00:00.000Z"
+    });
+    expect(updated.sessionMeta.serverVersion).toBe(3);
+    expect(updated.sessionMeta.serverUpdatedAt).toBe("2026-06-06T00:00:00.000Z");
   });
 });

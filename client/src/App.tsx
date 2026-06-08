@@ -37,7 +37,8 @@ import { generateTraceId, getSessionId, logError, logInfo } from "./logger";
 import {
   debouncedSyncWorkspaceMemoryToServer,
   flushDebouncedSessionMemorySync,
-  hydrateWorkspaceMemoryFromServer
+  hydrateWorkspaceMemoryFromServer,
+  setSessionSyncSuccessHandler
 } from "./sessionMemorySync";
 import {
   debouncedSaveWorkspaceMemory,
@@ -326,6 +327,7 @@ export default function App() {
   const workspaceMemoryRef = useRef<WorkspaceMemory>(emptyWorkspaceMemory());
   const sessionMemoryEnabledRef = useRef(false);
   const projectIdRef = useRef<string | null>(null);
+  const serverHydrateAttemptedRef = useRef<string | null>(null);
   const skipWorkspaceSaveRef = useRef(false);
   const diffPreviewLoggedRef = useRef(false);
   const lastAgentPlanPromptRef = useRef("");
@@ -362,19 +364,8 @@ export default function App() {
     [resolveModelLabel]
   );
 
-  const hydrateWorkspaceMemory = useCallback(
-    async (workspaceKey: string, bootId: string | null) => {
-      let memory = loadWorkspaceMemory(workspaceKey, bootId);
-      if (sessionMemoryEnabledRef.current && memory.sessionMeta.sessionId) {
-        try {
-          memory = await hydrateWorkspaceMemoryFromServer(memory);
-          saveWorkspaceMemory(workspaceKey, memory);
-        } catch (e) {
-          logError("session_memory_hydrate", {
-            message: (e as Error)?.message ?? String(e)
-          });
-        }
-      }
+  const applyHydratedMemory = useCallback(
+    (workspaceKey: string, memory: WorkspaceMemory, bootId: string | null) => {
       const cached = loadWorkspaceHistory(workspaceKey);
       skipMemorySaveRef.current = true;
       skipWorkspaceSaveRef.current = true;
@@ -397,11 +388,31 @@ export default function App() {
     []
   );
 
+  const hydrateWorkspaceMemory = useCallback(
+    async (workspaceKey: string, bootId: string | null) => {
+      let memory = loadWorkspaceMemory(workspaceKey, bootId);
+      if (sessionMemoryEnabledRef.current && memory.sessionMeta.sessionId) {
+        try {
+          memory = await hydrateWorkspaceMemoryFromServer(memory);
+          saveWorkspaceMemory(workspaceKey, memory);
+          serverHydrateAttemptedRef.current = workspaceKey;
+        } catch (e) {
+          logError("session_memory_hydrate", {
+            message: (e as Error)?.message ?? String(e)
+          });
+        }
+      }
+      applyHydratedMemory(workspaceKey, memory, bootId);
+    },
+    [applyHydratedMemory]
+  );
+
   const activateWorkspace = useCallback(
     (workspaceKey: string) => {
       flushDebouncedWorkspaceMemorySave();
       flushDebouncedWorkspaceHistorySave();
       void flushDebouncedSessionMemorySync();
+      serverHydrateAttemptedRef.current = null;
       setActiveWorkspaceKey(workspaceKey);
       void hydrateWorkspaceMemory(workspaceKey, serverBootId);
       setWorkspaceRules(loadWorkspaceRules(workspaceKey));
@@ -643,6 +654,44 @@ export default function App() {
   useEffect(() => {
     sessionMemoryEnabledRef.current = sessionMemoryEnabled;
   }, [sessionMemoryEnabled]);
+
+  useEffect(() => {
+    if (!sessionMemoryEnabled || !activeWorkspaceKey) {
+      return;
+    }
+    if (serverHydrateAttemptedRef.current === activeWorkspaceKey) {
+      return;
+    }
+    void (async () => {
+      const memory = loadWorkspaceMemory(activeWorkspaceKey, serverBootId);
+      if (!memory.sessionMeta.sessionId) {
+        return;
+      }
+      try {
+        const merged = await hydrateWorkspaceMemoryFromServer(memory);
+        serverHydrateAttemptedRef.current = activeWorkspaceKey;
+        saveWorkspaceMemory(activeWorkspaceKey, merged);
+        applyHydratedMemory(activeWorkspaceKey, merged, serverBootId);
+      } catch (e) {
+        logError("session_memory_hydrate", {
+          message: (e as Error)?.message ?? String(e)
+        });
+      }
+    })();
+  }, [sessionMemoryEnabled, activeWorkspaceKey, serverBootId, applyHydratedMemory]);
+
+  useEffect(() => {
+    setSessionSyncSuccessHandler((sessionId, memory) => {
+      if (workspaceMemoryRef.current.sessionMeta.sessionId !== sessionId) {
+        return;
+      }
+      workspaceMemoryRef.current = memory;
+      if (activeWorkspaceKey) {
+        saveWorkspaceMemory(activeWorkspaceKey, memory);
+      }
+    });
+    return () => setSessionSyncSuccessHandler(null);
+  }, [activeWorkspaceKey]);
 
   useEffect(() => {
     projectIdRef.current = projectId;

@@ -176,6 +176,13 @@ type PendingSync = {
 let syncTimer: ReturnType<typeof setTimeout> | null = null;
 let pendingSync: PendingSync | null = null;
 let syncInFlight = false;
+let onSyncSuccess: ((sessionId: string, memory: WorkspaceMemory) => void) | null = null;
+
+export function setSessionSyncSuccessHandler(
+  handler: ((sessionId: string, memory: WorkspaceMemory) => void) | null
+): void {
+  onSyncSuccess = handler;
+}
 
 async function flushPendingSessionSync(): Promise<void> {
   if (syncInFlight || !pendingSync) {
@@ -190,8 +197,12 @@ async function flushPendingSessionSync(): Promise<void> {
       workspaceKey: job.workspaceKey,
       expectedVersion: job.memory.sessionMeta.serverVersion ?? undefined
     });
-    if (result && pendingSync?.sessionId === job.sessionId) {
-      pendingSync.memory = applyServerSyncMeta(pendingSync.memory, result);
+    if (result) {
+      const updated = applyServerSyncMeta(job.memory, result);
+      onSyncSuccess?.(job.sessionId, updated);
+      if (pendingSync?.sessionId === job.sessionId) {
+        pendingSync.memory = updated;
+      }
     }
   } catch (e) {
     if (typeof console !== "undefined" && console.warn) {
@@ -241,5 +252,9 @@ export async function hydrateWorkspaceMemoryFromServer(
   if (!remote) {
     return local;
   }
-  return mergeWorkspaceMemory(local, remote.memory, remote.updatedAt);
+  const merged = mergeWorkspaceMemory(local, remote.memory, remote.updatedAt);
+  return applyServerSyncMeta(merged, {
+    version: remote.version,
+    updatedAt: remote.updatedAt
+  });
 }
