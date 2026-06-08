@@ -75,6 +75,8 @@ def infer_request_kind(path: str) -> str | None:
         return "execute"
     if p.endswith("/agent-stream") or p.endswith("/agent"):
         return "agent"
+    if p.startswith("/api/sessions"):
+        return "session_sync"
     if "/plan" in p:
         return "plan"
     return None
@@ -312,7 +314,12 @@ def parse_request_body_for_audit(
     ct = (content_type or "").lower()
     if "application/json" in ct or not ct:
         try:
-            return json.loads(body_bytes.decode("utf-8"))
+            parsed = json.loads(body_bytes.decode("utf-8"))
+            if kind == "session_sync":
+                from app.services.session_store import redact_session_body_for_audit
+
+                return redact_session_body_for_audit(parsed)
+            return parsed
         except (UnicodeDecodeError, json.JSONDecodeError):
             return _truncate_text(body_bytes.decode("utf-8", errors="replace"), _max_body_chars())
     return _truncate_text(
@@ -344,7 +351,15 @@ def parse_response_body_for_audit(
     ct = (content_type or "").lower()
     if "application/json" in ct or not ct:
         try:
-            return json.loads(body_bytes.decode("utf-8"))
+            parsed = json.loads(body_bytes.decode("utf-8"))
+            if kind == "session_sync" and isinstance(parsed, dict):
+                return {
+                    "_audit": "session_sync_metadata_only",
+                    "sessionId": parsed.get("sessionId"),
+                    "version": parsed.get("version"),
+                    "updatedAt": parsed.get("updatedAt"),
+                }
+            return parsed
         except (UnicodeDecodeError, json.JSONDecodeError):
             return _truncate_text(body_bytes.decode("utf-8", errors="replace"), _max_body_chars())
     return _truncate_text(

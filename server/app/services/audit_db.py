@@ -52,6 +52,22 @@ class HttpRequestLog(Base):
     created_at: Mapped[str] = mapped_column(String(32), nullable=False)
 
 
+class SessionMemoryRow(Base):
+    """Compressed product session memory (Stage 6); separate from audit rows."""
+
+    __tablename__ = "session_memory"
+
+    session_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    workspace_key_hash: Mapped[str | None] = mapped_column(
+        String(128), nullable=True, index=True
+    )
+    project_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    memory_json: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_at: Mapped[str] = mapped_column(String(32), nullable=False)
+    expires_at: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+
+
 class LlmCallLog(Base):
     __tablename__ = "llm_call_logs"
 
@@ -92,11 +108,18 @@ def get_session_factory() -> async_sessionmaker[AsyncSession] | None:
     return _session_factory
 
 
+def is_sqlite_persistence_enabled() -> bool:
+    """True when audit and/or session memory needs the shared SQLite file."""
+    return bool(settings.AUDIT_DB_ENABLED or settings.SESSION_MEMORY_DB_ENABLED)
+
+
 async def init_audit_db() -> None:
-    """Create engine, tables, and session factory when audit is enabled."""
+    """Create engine, tables, and session factory when audit or session memory is enabled."""
     global _engine, _session_factory
-    if not settings.AUDIT_DB_ENABLED:
-        log.info("audit_db disabled (AUDIT_DB_ENABLED=0)")
+    if not is_sqlite_persistence_enabled():
+        log.info(
+            "sqlite persistence disabled (AUDIT_DB_ENABLED=0, SESSION_MEMORY_DB_ENABLED=0)"
+        )
         return
     if _engine is not None:
         return
@@ -109,7 +132,12 @@ async def init_audit_db() -> None:
     _session_factory = async_sessionmaker(_engine, expire_on_commit=False)
     async with _engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    log.info("audit_db ready path=%s", db_path)
+    log.info(
+        "sqlite persistence ready path=%s audit=%s session_memory=%s",
+        db_path,
+        settings.AUDIT_DB_ENABLED,
+        settings.SESSION_MEMORY_DB_ENABLED,
+    )
 
 
 async def close_audit_db() -> None:

@@ -35,6 +35,11 @@ import {
 } from "./clarification";
 import { generateTraceId, getSessionId, logError, logInfo } from "./logger";
 import {
+  debouncedSyncWorkspaceMemoryToServer,
+  flushDebouncedSessionMemorySync,
+  hydrateWorkspaceMemoryFromServer
+} from "./sessionMemorySync";
+import {
   debouncedSaveWorkspaceMemory,
   flushDebouncedWorkspaceMemorySave,
   appendApplyLogEntry,
@@ -45,6 +50,7 @@ import {
   emptyWorkspaceMemory,
   formatLastApplyHint,
   loadWorkspaceMemory,
+  saveWorkspaceMemory,
   syncAgentTranscriptFromChat,
   updateSessionBootId,
   type AppliedPlanEntry,
@@ -314,9 +320,12 @@ export default function App() {
   const [workspaceRules, setWorkspaceRules] = useState("");
   const [activeWorkspaceKey, setActiveWorkspaceKey] = useState<string | null>(null);
   const [serverBootId, setServerBootId] = useState<string | null>(null);
+  const [sessionMemoryEnabled, setSessionMemoryEnabled] = useState(false);
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const skipMemorySaveRef = useRef(false);
   const workspaceMemoryRef = useRef<WorkspaceMemory>(emptyWorkspaceMemory());
+  const sessionMemoryEnabledRef = useRef(false);
+  const projectIdRef = useRef<string | null>(null);
   const skipWorkspaceSaveRef = useRef(false);
   const diffPreviewLoggedRef = useRef(false);
   const lastAgentPlanPromptRef = useRef("");
@@ -354,8 +363,18 @@ export default function App() {
   );
 
   const hydrateWorkspaceMemory = useCallback(
-    (workspaceKey: string, bootId: string | null) => {
-      const memory = loadWorkspaceMemory(workspaceKey, bootId);
+    async (workspaceKey: string, bootId: string | null) => {
+      let memory = loadWorkspaceMemory(workspaceKey, bootId);
+      if (sessionMemoryEnabledRef.current && memory.sessionMeta.sessionId) {
+        try {
+          memory = await hydrateWorkspaceMemoryFromServer(memory);
+          saveWorkspaceMemory(workspaceKey, memory);
+        } catch (e) {
+          logError("session_memory_hydrate", {
+            message: (e as Error)?.message ?? String(e)
+          });
+        }
+      }
       const cached = loadWorkspaceHistory(workspaceKey);
       skipMemorySaveRef.current = true;
       skipWorkspaceSaveRef.current = true;
@@ -373,9 +392,7 @@ export default function App() {
           memory.chatTranscript.length > 0
         )
       );
-      workspaceMemoryRef.current = bootId
-        ? updateSessionBootId(memory, bootId)
-        : memory;
+      workspaceMemoryRef.current = bootId ? updateSessionBootId(memory, bootId) : memory;
     },
     []
   );
@@ -384,8 +401,9 @@ export default function App() {
     (workspaceKey: string) => {
       flushDebouncedWorkspaceMemorySave();
       flushDebouncedWorkspaceHistorySave();
+      void flushDebouncedSessionMemorySync();
       setActiveWorkspaceKey(workspaceKey);
-      hydrateWorkspaceMemory(workspaceKey, serverBootId);
+      void hydrateWorkspaceMemory(workspaceKey, serverBootId);
       setWorkspaceRules(loadWorkspaceRules(workspaceKey));
     },
     [hydrateWorkspaceMemory, serverBootId]
@@ -623,6 +641,31 @@ export default function App() {
   }, [serverBootId, activeWorkspaceKey]);
 
   useEffect(() => {
+    sessionMemoryEnabledRef.current = sessionMemoryEnabled;
+  }, [sessionMemoryEnabled]);
+
+  useEffect(() => {
+    projectIdRef.current = projectId;
+  }, [projectId]);
+
+  const scheduleSessionMemorySync = useCallback(
+    (memory: WorkspaceMemory, workspaceKey: string | null) => {
+      if (!sessionMemoryEnabledRef.current || !workspaceKey) {
+        return;
+      }
+      const sessionId = memory.sessionMeta.sessionId;
+      if (!sessionId) {
+        return;
+      }
+      debouncedSyncWorkspaceMemoryToServer(sessionId, memory, {
+        projectId: projectIdRef.current,
+        workspaceKey
+      });
+    },
+    []
+  );
+
+  useEffect(() => {
     if (!activeWorkspaceKey) {
       return;
     }
@@ -645,8 +688,10 @@ export default function App() {
     };
     workspaceMemoryRef.current = updated;
     debouncedSaveWorkspaceMemory(activeWorkspaceKey, updated);
+    scheduleSessionMemorySync(updated, activeWorkspaceKey);
     return () => {
       flushDebouncedWorkspaceMemorySave();
+      void flushDebouncedSessionMemorySync();
     };
   }, [
     activeWorkspaceKey,
@@ -654,7 +699,8 @@ export default function App() {
     appliedPlansSummary,
     agentPreviewHistory,
     applyLog,
-    serverBootId
+    serverBootId,
+    scheduleSessionMemorySync
   ]);
 
   useEffect(() => {
@@ -698,6 +744,7 @@ export default function App() {
         if (c.serverBootId) {
           setServerBootId(c.serverBootId);
         }
+        setSessionMemoryEnabled(!!c.sessionMemoryEnabled);
         setModelOptions(c);
         const resolved = resolveModelPreference(loadModelPreference(), c);
         setModelSource(resolved.modelSource);
@@ -787,6 +834,10 @@ export default function App() {
     workspaceMemoryRef.current = next;
     setApplyLog(next.applyLog);
     setAppliedPlansSummary(next.appliedPlansSummary);
+    if (activeWorkspaceKey) {
+      saveWorkspaceMemory(activeWorkspaceKey, next);
+      scheduleSessionMemorySync(next, activeWorkspaceKey);
+    }
   }
 
   function summarizePlanForChat(p: Plan | null): string {

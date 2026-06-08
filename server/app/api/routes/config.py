@@ -21,4 +21,6 @@ async def get_config():
         "ollamaModels": [{"id": mid, "label": label} for mid, label in settings.ollama_model_list],
         "llmUpstreamMaxTimeoutSeconds": max_llm_upstream_http_timeout_seconds(),
         "llmClientTimeoutRecommendedMs": recommended_llm_client_timeout_ms(),
+        "sessionMemoryEnabled": settings.SESSION_MEMORY_DB_ENABLED,
+        "sessionMemoryTtlDays": settings.SESSION_MEMORY_TTL_DAYS,
     }

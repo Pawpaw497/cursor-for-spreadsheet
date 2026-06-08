@@ -26,7 +26,7 @@ Keyed by `workspaceKey` (see [`workspaceHistoryStorage.ts`](../client/src/worksp
 
 ### AgentSessionMemory (server, optional Stage 6)
 
-Same logical fields as `WorkspaceMemory`, keyed by client-generated `sessionId` (not plaintext `workspaceKey` on the wire). Stored in SQLite `session_memory` table when Stage 6 lands.
+Same logical fields as `WorkspaceMemory`, keyed by client-generated `sessionId` (not plaintext `workspaceKey` on the wire). Stored in SQLite `session_memory` table when `SESSION_MEMORY_DB_ENABLED=1`.
 
 ---
 
@@ -132,6 +132,24 @@ Long Agent threads are trimmed deterministically before each LLM call (no audit-
 |-------|--------|------|
 | Server | `server/app/agent/memory_compaction.py` | `compact_agent_messages` in `initial_state_from_agent_project_request` (history before selection + table user); `apply_message_compaction` in `agent_react_step` before `pa_decision_step` when tools extend the loop |
 | Client | `client/src/memoryCompaction.ts` | `buildAgentHistoryFromTranscript` / `buildAgentHistoryForRequest` instead of `slice(-24)` |
+
+## Stage 6 — Optional server session store
+
+Browser-first `WorkspaceMemory` remains SSOT; optional SQLite backup enables multi-tab sync and restore within TTL.
+
+### Backend
+
+- Table `session_memory` in the same SQLite file as audit (`server/data/audit.sqlite3`).
+- Routes: `GET/PUT /api/sessions/{sessionId}` (disabled when `SESSION_MEMORY_DB_ENABLED=0`).
+- Config: `SESSION_MEMORY_DB_ENABLED`, `SESSION_MEMORY_TTL_DAYS` (default 7); exposed on `/api/config` as `sessionMemoryEnabled`.
+- Audit middleware records session sync as metadata-only (no full `memory_json` in audit rows).
+
+### Frontend
+
+- `client/src/sessionMemorySync.ts`: hydrate merge (LWW on `localUpdatedAt` vs server `updatedAt`), debounced PUT after memory changes and Apply.
+- On workspace activate: fetch server session when enabled; empty localStorage can restore chat within TTL.
+
+**Enable:** set `SESSION_MEMORY_DB_ENABLED=1` in `server/.env` and restart backend.
 
 ## Clarification Phase 3 (agent transcript + selection-aware gates)
 
