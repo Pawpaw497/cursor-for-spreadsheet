@@ -89,7 +89,9 @@ flowchart LR
      - **响应形状**：`kind: "clarification"`，正文含 `clarification.question`、`clarification.options`（常为表名列表）、`clarification.context`；**无** `plan`（字段为 `null` 或省略）。
      - **续跑请求（Phase 2）**：`AgentProjectPlanRequest` 可选字段 `clarificationReply`（用户答案）与 `clarificationTurnId`；服务端将其作为 `user` 消息并入 `state.messages`，`prompt` 仍为主意图（会剥离客户端 `[Clarification]` 后缀）。前端 `submitClarificationAnswer` 优先发送 `clarificationReply` 而非仅拼接 prompt。
      - **交互约定（Phase 1 前端）**：用户应**回答澄清**（点选 `options` 或简短回复），而不是把整条 Cmd+K 指令重写一遍；续跑时前端会保留原 `prompt` 并把澄清 Q/A 写入 `history` 再调 `/api/agent`。
-     - **SSE / 技术历史**：`client/src/agentStream.ts` 提供 `consumeAgentStream` 解析 `/api/agent-stream`；澄清终端事件可写入 History 标签（`mode: agent_clarification`）。开发环境可通过 `window.__spreadsheetCursorConsumeAgentStream` 调用。
+     - **SSE / 技术历史**：`client/src/agentStream.ts` 提供 `consumeAgentStream` 解析 `/api/agent-stream`；`client/src/agentProjectPlan.ts` 的 `requestAgentProjectPlanViaStream` 将终端事件映射为与 `/api/agent` 相同的 `AgentProjectPlanResult`。澄清终端事件写入 History 标签（`mode: agent_clarification`）。开发环境可通过 `window.__spreadsheetCursorConsumeAgentStream` 调用。
+     - **客户端结构化日志**：收到澄清时 `logInfo("agent_clarification", { traceId, source, optionsCount, hasContext, questionPreview })`；用户回答并成功续跑时 `logInfo("clarification_resolved", { traceId, clarificationTurnId, answerLength, resultKind, success })`（失败时 `success: false`）。
+     - **可选 SSE Generate**：在 `client/.env` 设置 `VITE_AGENT_USE_STREAM=true` 后，多表 **Generate Plan** 走 `/api/agent-stream` 而非同步 `/api/agent`；默认关闭，行为不变。
      - **计划与测试**：实现路线图见 [`.cursor/plans/agent-clarification-loop.plan.md`](.cursor/plans/agent-clarification-loop.plan.md)；HTTP 映射回归见 `server/tests/test_agent_clarification_route.py`，`clarificationReply` 见 `server/tests/test_agent_clarification_reply.py`，规则单测见 `server/tests/test_clarification.py`。
    - **显式上下文包（Stage 4）**：Agent 请求可选 `context`（当前表、网格选区/焦点列、工作区 rules）；rules 存于浏览器 `localStorage`，详见 [`docs/agent-memory.md`](docs/agent-memory.md)。
 8. **多表 Agent 预览生命周期（可选 `previewLifecycle`）**：

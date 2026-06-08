@@ -15,20 +15,24 @@ from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
 
 from app.agent.actions import (
     AgentAction,
+    AskClarificationAction,
     CallToolAction,
     CallToolPayload,
+    ClarificationPayload,
     FinishAction,
     FinishPayload,
     OutputPlanAction,
 )
 from app.agent.agent_helpers import state_after_turn, state_with_user_feedback
 from app.agent.clarification import maybe_need_clarification
+from app.agent.clarification_telemetry import log_clarification_issued
 from app.agent.pa_state import (
     build_pa_message_history,
     system_instructions_for_state,
     user_prompt_for_pa_run,
 )
 from app.agent.pa_tools import (
+    ASK_USER_TOOL_NAME,
     PA_OUTPUT_TOOL_NAME,
     PaAgentDeps,
     register_pa_agent_tools,
@@ -217,6 +221,7 @@ async def _finish_from_structured_plan(
 
     clarify = maybe_need_clarification(state, validated)
     if clarify is not None:
+        log_clarification_issued(clarify.payload, source="post_plan_rule")
         next_state = state_after_turn(state)
         return (next_state, clarify)
 
@@ -388,6 +393,46 @@ async def pa_decision_step(
         tc = turn.tool_parts[0]
         tool_name = tc.tool_name or ""
         tool_call_id = tc.tool_call_id
+
+        if tool_name == ASK_USER_TOOL_NAME:
+            args = coerce_tool_call_args(tool_name, tc.args)
+            if args is None:
+                log.warning(
+                    "pa_decision ask_user arguments invalid id=%s raw_type=%s",
+                    tool_call_id,
+                    type(tc.args).__name__,
+                )
+                if state.current_turn + 1 >= state.max_turns:
+                    return (
+                        state,
+                        FinishAction(
+                            FinishPayload(
+                                reason=(
+                                    "invalid_tool_arguments: ask_user: "
+                                    "question required"
+                                )
+                            )
+                        ),
+                    )
+                feedback = (
+                    "Tool call ask_user had invalid arguments. "
+                    'Use {"question": "...", "options": ["..."], "context": "..."} '
+                    "with a non-empty question string."
+                )
+                retry_state = state_with_user_feedback(state, feedback)
+                return await pa_decision_step(retry_state, use_tools=use_tools)
+
+            payload = ClarificationPayload(
+                question=str(args["question"]),
+                options=args.get("options"),
+                context=args.get("context"),
+            )
+            log_clarification_issued(payload, source="ask_user")
+            return (
+                state_after_turn(state),
+                AskClarificationAction(payload=payload),
+            )
+
         args = coerce_tool_call_args(tool_name, tc.args)
         if args is None:
             log.warning(

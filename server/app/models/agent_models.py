@@ -163,6 +163,12 @@ def initial_state_from_agent_project_request(req: Any) -> AgentState:
     user_prompt = req.prompt
     clarification_reply = (req.clarificationReply or "").strip()
     if clarification_reply:
+        from app.agent.clarification_telemetry import log_clarification_resolved
+
+        log_clarification_resolved(
+            reply=clarification_reply,
+            turn_id=(req.clarificationTurnId or None),
+        )
         user_prompt = _strip_clarification_prompt_suffix(user_prompt)
         if not (
             history_msgs

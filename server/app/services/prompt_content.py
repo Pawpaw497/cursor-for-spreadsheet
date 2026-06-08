@@ -152,6 +152,8 @@ _PROJECT_RULES = (
     "validationWarnings vs validationErrors in diff; never mutates rows.\n"
     "- pivot_table / unpivot_table: source=existing table name; resultTable=new unique name; "
     "pivot: index, columns, values, agg; unpivot: idVars, valueVars, varName, valueName.\n"
+    "- If the target table or column is unclear, call ask_user with a short question "
+    "(use table names as options) before outputting a plan.\n"
 )
 
 # 模块加载时生成，对外仍为常量

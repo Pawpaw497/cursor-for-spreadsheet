@@ -8,6 +8,7 @@ import "ag-grid-community/styles/ag-theme-quartz.css";
 
 import type { CellFormat, Diff, Plan, PreviewRecord, SchemaCol, TableData } from "./types";
 import { applyProjectPlan, inferSchema } from "./engine";
+import { requestAgentProjectPlanViaStream } from "./agentProjectPlan";
 import {
   exportProjectToExcel,
   executePlanOnServer,
@@ -979,6 +980,13 @@ export default function App() {
           : "")
     );
     setPrompt("");
+    logInfo("agent_clarification", {
+      traceId,
+      source,
+      optionsCount: clarification.options?.length ?? 0,
+      hasContext: Boolean(clarification.context?.trim()),
+      questionPreview: clarification.question.slice(0, 120)
+    });
     logInfo("plan_response", {
       traceId,
       success: true,
@@ -1068,6 +1076,13 @@ export default function App() {
         const nextPlan = agentRes.plan;
         setPendingServerPreviewId(null);
         setPlan(nextPlan);
+        logInfo("clarification_resolved", {
+          traceId,
+          clarificationTurnId: pending.traceId,
+          answerLength: trimmed.length,
+          resultKind: agentRes.kind,
+          success: true
+        });
         logInfo("plan_response", {
           traceId,
           success: true,
@@ -1097,6 +1112,13 @@ export default function App() {
         const st = agentRes.state;
         const rc = Number(st.revision_count ?? st.revisionCount ?? 0);
         setAgentRevisionCount(Number.isFinite(rc) ? rc : 0);
+        logInfo("clarification_resolved", {
+          traceId,
+          clarificationTurnId: pending.traceId,
+          answerLength: trimmed.length,
+          resultKind: agentRes.kind,
+          success: true
+        });
         logInfo("plan_response", {
           traceId,
           success: true,
@@ -1108,10 +1130,22 @@ export default function App() {
         return;
       }
 
+      logInfo("clarification_resolved", {
+        traceId,
+        clarificationTurnId: pending.traceId,
+        answerLength: trimmed.length,
+        success: false
+      });
       setStatus("Unexpected agent response after clarification.");
     } catch (e: unknown) {
       const msg = String((e as Error)?.message ?? e);
       const { technical } = splitApiErrorDetail(msg);
+      logInfo("clarification_resolved", {
+        traceId,
+        clarificationTurnId: pending.traceId,
+        answerLength: trimmed.length,
+        success: false
+      });
       logError("clarification_resume_error", {
         traceId,
         message: msg,
@@ -1163,7 +1197,7 @@ export default function App() {
           cloudModelId: modelSource === "cloud" ? cloudModelId : undefined,
           localModelId: modelSource === "local" ? localModelId : undefined
         };
-        const agentRes = await requestAgentProjectPlan({
+        const agentOpts = {
           prompt,
           tables: tablesArr,
           modelSource,
@@ -1180,7 +1214,11 @@ export default function App() {
           revisionCount: agentRevisionCount,
           signal: takeAgentLlmAbortSignal(),
           context: buildAgentContextPayload()
-        });
+        };
+        const useAgentStream = import.meta.env.VITE_AGENT_USE_STREAM === "true";
+        const agentRes = useAgentStream
+          ? await requestAgentProjectPlanViaStream(agentOpts)
+          : await requestAgentProjectPlan(agentOpts);
         if (agentRes.kind === "clarification") {
           receiveAgentClarification(agentRes.clarification, prompt, traceId, "generate");
           return;
@@ -2239,7 +2277,21 @@ export default function App() {
                         {expandedResponseIds.has(item.id) && item.mode === "agent_clarification" && item.clarification && (
                           <>
                             <div style={{ fontWeight: 600, marginTop: 4 }}>Clarification</div>
-                            <pre>{JSON.stringify(item.clarification, null, 2)}</pre>
+                            <div className="small" style={{ marginTop: 4 }}>
+                              <strong>Question：</strong> {item.clarification.question}
+                            </div>
+                            {item.clarification.options && item.clarification.options.length > 0 && (
+                              <div className="small" style={{ marginTop: 4 }}>
+                                <strong>Options：</strong>{" "}
+                                {item.clarification.options.join(" / ")}
+                              </div>
+                            )}
+                            {item.clarification.context && (
+                              <>
+                                <div style={{ fontWeight: 600, marginTop: 8 }}>Context</div>
+                                <pre>{item.clarification.context}</pre>
+                              </>
+                            )}
                           </>
                         )}
                         {expandedResponseIds.has(item.id) && item.plan && (
