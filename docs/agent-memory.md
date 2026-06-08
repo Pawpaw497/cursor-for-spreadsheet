@@ -106,6 +106,33 @@ Later stages add compaction and optional server sync — without changing the in
 - **Client**: AI panel workspace rules textarea persisted to `localStorage` key `spreadsheet-cursor:rules:<workspaceKey>`; grid selection/focus sent on each Agent call via `buildAgentRequestContext`.
 - **Injection**: selection + rules render as a dedicated user snippet **before** the table-context user message on the current turn.
 
+## Stage 5 — Compaction and budget
+
+Long Agent threads are trimmed deterministically before each LLM call (no audit-log input, no LLM summarization in v1).
+
+### Caps (defaults)
+
+| Constant | Default | Scope |
+|----------|---------|--------|
+| `MAX_CHAT_TURNS` | 24 | Plain user/assistant rows in compactable prefix |
+| `MAX_TOOL_MESSAGES` | 12 | Tool-related rows (`role: tool` or assistant with `tool_calls`) |
+
+`preview_history` and apply-log rolling summary remain capped separately (server revision limits; client `MAX_APPLY_LOG` / `MAX_SUMMARY_ENTRIES`).
+
+### Middle-out policy
+
+1. **Prefix vs tail** — compact only the prefix; preserve trailing selection + table-context user messages (markers: `Current selection:` / `Workspace rules:`; `Spreadsheet schema:` / `Project has multiple tables:`).
+2. **Plain chat** — keep the last N user/assistant rows; dropped rows collapse into one synthetic user message: `Earlier in this workspace:\n{summary}` where `{summary}` is `applied_plans_summary` (server) or `appliedPlansSummary` / `applyLog` (client).
+3. **Tool trace** — keep the last N tool-related rows verbatim; older tools become one-line digests appended under `Prior tool calls:` in the summary block.
+4. **Forbidden** — never read `http_request_logs` / `llm_call_logs` for compaction.
+
+### Wiring
+
+| Layer | Module | When |
+|-------|--------|------|
+| Server | `server/app/agent/memory_compaction.py` | `compact_agent_messages` in `initial_state_from_agent_project_request` (history before selection + table user); `apply_message_compaction` in `agent_react_step` before `pa_decision_step` when tools extend the loop |
+| Client | `client/src/memoryCompaction.ts` | `buildAgentHistoryFromTranscript` / `buildAgentHistoryForRequest` instead of `slice(-24)` |
+
 ## Clarification Phase 3 (agent transcript + selection-aware gates)
 
 - **`buildAgentHistoryForRequest`**: Agent `history` prefers persisted `workspaceMemory.agentTranscript` (includes `[Clarification]` Q/A formatting); falls back to chat-derived transcript only when `agentTranscript` is empty.

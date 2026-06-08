@@ -21,6 +21,7 @@ from app.agent.actions import (
     action_kind,
 )
 from app.agent.agent_helpers import run_tool_and_append_messages
+from app.agent.memory_compaction import apply_message_compaction
 from app.agent.pa_decision import pa_decision_step
 from app.agent.state import AgentState
 from app.logging_config import get_logger
@@ -44,6 +45,7 @@ async def agent_react_step(
     use_tools: bool = True,
 ) -> tuple[AgentState, AgentAction]:
     """Single ReAct LLM turn shared by sync graph ``llm_decide`` and SSE stream."""
+    state = apply_message_compaction(state)
     return await pa_decision_step(state, use_tools=use_tools)
 
 
