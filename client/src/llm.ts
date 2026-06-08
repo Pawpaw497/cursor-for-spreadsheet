@@ -245,6 +245,9 @@ export type ConfigResponse = {
   llmUpstreamMaxTimeoutSeconds?: number;
   /** 建议的前端 LLM 请求总超时（毫秒）= 上游最大 + 缓冲；由 `/api/config` 下发。 */
   llmClientTimeoutRecommendedMs?: number;
+  /** Stage 6: optional SQLite session backup when `SESSION_MEMORY_DB_ENABLED=1`. */
+  sessionMemoryEnabled?: boolean;
+  sessionMemoryTtlDays?: number;
 };
 
 export type ChatRole = "user" | "assistant" | "system";

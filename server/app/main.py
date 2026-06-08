@@ -19,7 +19,7 @@ from app.services.audit_log import (
     parse_response_body_for_audit,
     schedule_record_http_request,
 )
-from app.api.routes import agent, chat, config, export, health, load, plan
+from app.api.routes import agent, chat, config, export, health, load, plan, sessions
 from app.services.llm import (
     LLM_HTTP_LIMITS,
     create_llm_http_client,
@@ -302,3 +302,4 @@ app.include_router(agent.router)
 app.include_router(export.router)
 app.include_router(load.router)
 app.include_router(chat.router)
+app.include_router(sessions.router)

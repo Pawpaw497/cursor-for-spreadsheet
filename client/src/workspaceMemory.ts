@@ -40,6 +40,10 @@ export type SessionMeta = {
   sessionId: string;
   lastServerBootId: string | null;
   schemaFingerprint: string | null;
+  /** Client-side LWW timestamp for server sync (Stage 6). */
+  localUpdatedAt?: string | null;
+  serverVersion?: number | null;
+  serverUpdatedAt?: string | null;
 };
 
 export type WorkspaceMemory = {
@@ -117,6 +121,18 @@ function parseMemory(raw: string): WorkspaceMemory | null {
         schemaFingerprint:
           typeof parsed.sessionMeta?.schemaFingerprint === "string"
             ? parsed.sessionMeta.schemaFingerprint
+            : null,
+        localUpdatedAt:
+          typeof parsed.sessionMeta?.localUpdatedAt === "string"
+            ? parsed.sessionMeta.localUpdatedAt
+            : null,
+        serverVersion:
+          typeof parsed.sessionMeta?.serverVersion === "number"
+            ? parsed.sessionMeta.serverVersion
+            : null,
+        serverUpdatedAt:
+          typeof parsed.sessionMeta?.serverUpdatedAt === "string"
+            ? parsed.sessionMeta.serverUpdatedAt
             : null
       }
     };
@@ -417,11 +433,16 @@ export function saveWorkspaceMemory(workspaceKey: string, memory: WorkspaceMemor
   if (typeof localStorage === "undefined" || !workspaceKey) {
     return;
   }
+  const nowIso = new Date().toISOString();
   const body: WorkspaceMemory = {
     ...memory,
     version: MEMORY_VERSION,
     agentTranscript: truncateAgentTranscript(memory.agentTranscript),
-    applyLog: memory.applyLog.slice(0, MAX_APPLY_LOG)
+    applyLog: memory.applyLog.slice(0, MAX_APPLY_LOG),
+    sessionMeta: {
+      ...memory.sessionMeta,
+      localUpdatedAt: nowIso
+    }
   };
   try {
     localStorage.setItem(storageKey(workspaceKey), JSON.stringify(body));

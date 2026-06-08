@@ -95,6 +95,7 @@ flowchart LR
      - **计划与测试**：实现路线图见 [`.cursor/plans/agent-clarification-loop.plan.md`](.cursor/plans/agent-clarification-loop.plan.md)；HTTP 映射回归见 `server/tests/test_agent_clarification_route.py`，`clarificationReply` 见 `server/tests/test_agent_clarification_reply.py`，规则单测见 `server/tests/test_clarification.py`。
    - **显式上下文包（Stage 4）**：Agent 请求可选 `context`（当前表、网格选区/焦点列、工作区 rules）；rules 存于浏览器 `localStorage`，详见 [`docs/agent-memory.md`](docs/agent-memory.md)。
    - **记忆压缩（Stage 5）**：长对话在服务端 `memory_compaction.py` 与客户端 `memoryCompaction.ts` 中按 middle-out 策略裁剪（默认 24 轮聊天 / 12 条 tool 行），详见 [`docs/agent-memory.md`](docs/agent-memory.md)。
+   - **服务端会话备份（Stage 6，可选）**：`SESSION_MEMORY_DB_ENABLED=1` 时，`GET/PUT /api/sessions/{sessionId}` 将压缩后的 `WorkspaceMemory` 写入 SQLite `session_memory` 表，支持多 tab 同步与 TTL 内从服务端恢复；默认关闭。
 8. **多表 Agent 预览生命周期（可选 `previewLifecycle`）**：
    - **多表 / 项目模式**下，「Generate Plan」走 `/api/agent`，请求体带 `previewLifecycle: true`；有 `projectId` 时服务端从 `ProjectState` 克隆表做 dry-run，无 `projectId` 时需同时传 `previewTables`（全量行）以便服务端在副本上执行计划。
    - 无 `projectId` 时，`previewTables` 每张表最多 **5000** 行：超出部分在前端序列化与后端 `execution_tables_from_execute_tables` 中截断并记 warning，避免超大 JSON 触发反代 body 限制或内存尖峰（常量：`client` 的 `PREVIEW_TABLES_MAX_ROWS_PER_TABLE` 与后端 `PREVIEW_TABLES_MAX_ROWS_PER_TABLE` 须保持一致）。
@@ -275,6 +276,8 @@ npm run dev
 ### SQLite 请求审计（默认开启）
 
 在 `server/.env` 中可通过 **`AUDIT_DB_ENABLED`**（默认 `1`）控制是否把每次 HTTP API 与上游 LLM 调用写入本地 SQLite（默认路径 **`data/audit.sqlite3`**，相对于 `server/` 目录）。与浏览器端的对话/工作区历史（`localStorage` / `sessionStorage`）是两套系统：审计库是开发排障用的事实记录，**不会**注入 Agent prompt。
+
+可选 **`SESSION_MEMORY_DB_ENABLED=1`** 复用同一 SQLite 文件中的 `session_memory` 表，备份压缩后的工作区会话（见 [`docs/agent-memory.md`](docs/agent-memory.md) Stage 6）；与审计表独立，默认关闭。
 
 - 表 **`http_request_logs`** / **`llm_call_logs`** 通过同一 **`trace_id`**（`X-Request-ID`）关联；Agent PA 单轮记为 `call_kind=pa_turn`。
 - **`AUDIT_MAX_BODY_CHARS`**（默认 `50000`）截断请求/响应与 message 体积；`/api/import-file`、`/api/export-excel` 与 `/api/agent-stream`（SSE）仅记 metadata。

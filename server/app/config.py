@@ -71,10 +71,11 @@ class Settings:
     AUDIT_STORE_WORKSPACE_KEY: bool = os.getenv(
         "AUDIT_STORE_WORKSPACE_KEY", "0"
     ).lower() in ("1", "true", "yes")
-    # Reserved for memory Stage 6 (not used by audit MVP)
+    # Optional server session memory (Stage 6); shares SQLite file with audit
     SESSION_MEMORY_DB_ENABLED: bool = os.getenv(
         "SESSION_MEMORY_DB_ENABLED", "0"
     ).lower() in ("1", "true", "yes")
+    SESSION_MEMORY_TTL_DAYS: int = int(os.getenv("SESSION_MEMORY_TTL_DAYS", "7"))
 
     # Agent PA: debug-only — parse assistant text as Plan JSON when structured output missing
     AGENT_PA_PLAN_JSON_FALLBACK: bool = os.getenv(
