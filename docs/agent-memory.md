@@ -36,11 +36,12 @@ Each Agent / plan request assembles LLM input in this order:
 
 1. **System** — spreadsheet rules (`SpreadsheetPrompt` / `ProjectPrompt`)
 2. **Memory block** — `appliedPlansSummary` (+ later: last N apply-log lines, pinned notes)
-3. **Table context user message** — schema + sample rows for current prompt
-4. **Transcript** — prior user/assistant (and tool) turns from `state.messages` / `history`
-5. **Current prompt** — user's latest natural-language request
+3. **Selection / context user snippet** — active table, grid selection, focused column, optional workspace rules (Stage 4)
+4. **Table context user message** — schema + sample rows for current prompt
+5. **Transcript** — prior user/assistant (and tool) turns from `state.messages` / `history`
+6. **Current prompt** — user's latest natural-language request
 
-Backend helper: `build_memory_context_block()` in `server/app/agent/memory_context.py`. Wired into PA `system_instructions_for_state` and legacy `_build_messages_dict_from_state`.
+Backend helpers: `build_memory_context_block()` in `server/app/agent/memory_context.py`; `assemble_agent_context()` in `server/app/agent/context_assembler.py`. Wired into PA `system_instructions_for_state`, `initial_state_from_agent_project_request`, and legacy `_build_messages_dict_from_state`.
 
 ---
 
@@ -97,3 +98,16 @@ Later stages add compaction and optional server sync — without changing the in
 - Cmd+K context strip: active table, grid selection hint, last apply summary.
 - Agent requests send `X-Session-ID` (`sessionMeta.sessionId`).
 - Server memory block includes preview lineage for aborted/revised previews.
+
+## Stage 4 (context assembler)
+
+- **`context_assembler.py`**: `assemble_agent_context(state)` returns an `AgentContextPackage` with tables, selection, workspace rules, memory block, and transcript summary.
+- **Request field** `context` on `AgentProjectPlanRequest`: optional `activeTable`, `selectedRange`, `focusedColumn`, `workspaceRules`.
+- **Client**: AI panel workspace rules textarea persisted to `localStorage` key `spreadsheet-cursor:rules:<workspaceKey>`; grid selection/focus sent on each Agent call via `buildAgentRequestContext`.
+- **Injection**: selection + rules render as a dedicated user snippet **before** the table-context user message on the current turn.
+
+## Clarification Phase 3 (agent transcript + selection-aware gates)
+
+- **`buildAgentHistoryForRequest`**: Agent `history` prefers persisted `workspaceMemory.agentTranscript` (includes `[Clarification]` Q/A formatting); falls back to chat-derived transcript only when `agentTranscript` is empty.
+- **Clarification persistence**: `receiveAgentClarification` / `submitClarificationAnswer` append formatted Q and A turns to `agentTranscript` directly; `syncAgentTranscriptFromChat` is append-only when a transcript already exists so clarification turns are not dropped.
+- **Selection-aware clarification skip**: `maybe_need_clarification` reads `state.request_context`; when `activeTable` (and matching `focusedColumn` or single-column `selectedRange`) disambiguates multi-table column refs or write steps missing `table`, deterministic clarification is skipped.

@@ -68,6 +68,21 @@ class RollbackLastStepArgs(BaseModel):
     """No parameters."""
 
 
+class AskUserArgs(BaseModel):
+    question: str = Field(description="Short clarification question for the user.")
+    options: list[str] | None = Field(
+        default=None,
+        description="Optional choices (e.g. table names) for the user to pick from.",
+    )
+    context: str | None = Field(
+        default=None,
+        description="Optional brief context shown with the question.",
+    )
+
+
+ASK_USER_TOOL_NAME = "ask_user"
+
+
 @dataclass(frozen=True, slots=True)
 class PaToolDefinition:
     name: str
@@ -122,6 +137,14 @@ PA_TOOL_DEFINITIONS: tuple[PaToolDefinition, ...] = (
             "real rollback is handled in the frontend."
         ),
         args_model=RollbackLastStepArgs,
+    ),
+    PaToolDefinition(
+        name=ASK_USER_TOOL_NAME,
+        description=(
+            "Ask the user a clarification question when intent is ambiguous. "
+            "Use BEFORE outputting a plan when the target table or column is unclear."
+        ),
+        args_model=AskUserArgs,
     ),
 )
 

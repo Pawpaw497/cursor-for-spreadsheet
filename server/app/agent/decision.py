@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.agent.context_assembler import selection_context_user_message
 from app.agent.memory_context import append_memory_to_system_prompt
 from app.agent.user_context import build_initial_user_message_from_tables
 from app.models.agent_models import AgentState
@@ -26,6 +27,9 @@ def _build_messages_dict_from_state(state: AgentState) -> list[dict[str, Any]]:
     system_content = _system_content_for_state(state)
     out: list[dict[str, Any]] = [{"role": "system", "content": system_content}]
     if not state.messages:
+        selection_msg = selection_context_user_message(state.request_context)
+        if selection_msg is not None:
+            out.append(selection_msg)
         out.append(build_initial_user_message_from_tables(state.user_prompt, state.tables))
         return out
 

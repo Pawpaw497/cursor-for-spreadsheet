@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { AgentRequestContext } from "./agentContext";
 import {
   generateTraceId,
   logError,
@@ -632,7 +633,7 @@ export type AgentProjectPlanResult =
       clarification: { question: string; options?: string[] | null; context?: string | null };
     };
 
-export async function requestAgentProjectPlan(opts: {
+export type AgentProjectPlanRequestOpts = {
   prompt: string;
   tables: TableData[];
   modelSource?: ModelSource;
@@ -651,9 +652,21 @@ export async function requestAgentProjectPlan(opts: {
   previewId?: string | null;
   revisionMessage?: string | null;
   commitPlan?: Plan | null;
+  clarificationReply?: string | null;
+  clarificationTurnId?: string | null;
   /** 与超时合成后任一 abort 即取消本次 ``fetch``（例如连续提交时取消上一次 in-flight 请求）。 */
   signal?: AbortSignal;
-}): Promise<AgentProjectPlanResult> {
+  context?: AgentRequestContext;
+};
+
+export function parsePlanFromWire(raw: Record<string, unknown>): Plan {
+  return PlanSchema.parse(raw);
+}
+
+/** Shared JSON body for ``/api/agent`` and ``/api/agent-stream``. */
+export function buildAgentProjectPlanRequestBody(
+  opts: AgentProjectPlanRequestOpts
+): Record<string, unknown> {
   const tablesPayload = opts.tables.map((t) => ({
     name: t.name,
     schema: t.schema,
@@ -708,6 +721,22 @@ export async function requestAgentProjectPlan(opts: {
   if (opts.commitPlan) {
     body.commitPlan = opts.commitPlan;
   }
+  if (opts.context) {
+    body.context = opts.context;
+  }
+  if (opts.clarificationReply) {
+    body.clarificationReply = opts.clarificationReply;
+  }
+  if (opts.clarificationTurnId) {
+    body.clarificationTurnId = opts.clarificationTurnId;
+  }
+  return body;
+}
+
+export async function requestAgentProjectPlan(
+  opts: AgentProjectPlanRequestOpts
+): Promise<AgentProjectPlanResult> {
+  const body = buildAgentProjectPlanRequestBody(opts);
   const resp = await fetchWithTimeout(
     `${API_BASE}/api/agent`,
     {

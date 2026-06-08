@@ -701,6 +701,26 @@ pre {
   border-top: 1px solid #eee;
 }
 
+.workspace-rules-panel {
+  margin-top: 6px;
+  color: #555;
+}
+
+.workspace-rules-panel summary {
+  cursor: pointer;
+  user-select: none;
+}
+
+.workspace-rules-textarea {
+  width: 100%;
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.4;
+  resize: vertical;
+  min-height: 56px;
+  box-sizing: border-box;
+}
+
 .chat-message-row {
   display: flex;
   width: 100%;

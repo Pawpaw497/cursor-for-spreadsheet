@@ -75,6 +75,7 @@ class AgentState(BaseModel):
     model_source: Literal["cloud", "local"] = "cloud"
     cloud_model_id: Optional[str] = None
     local_model_id: Optional[str] = None
+    request_context: Optional[Any] = None
 
     def to_dict(self) -> Dict[str, Any]:
         """便于日志或 SSE 推送的字典表示（不含完整 messages 时可截断）。
@@ -136,6 +137,15 @@ def initial_state_from_project_request(req: Any) -> AgentState:
     )
 
 
+def _strip_clarification_prompt_suffix(prompt: str) -> str:
+    """Remove client-side ``[Clarification]`` suffix when ``clarificationReply`` is set."""
+    marker = "\n\n[Clarification]\n"
+    idx = prompt.rfind(marker)
+    if idx >= 0:
+        return prompt[:idx]
+    return prompt
+
+
 def initial_state_from_agent_project_request(req: Any) -> AgentState:
     """从带历史的 Agent 请求构建初始 AgentState。"""
     from app.models.plan import AgentProjectPlanRequest
@@ -146,20 +156,46 @@ def initial_state_from_agent_project_request(req: Any) -> AgentState:
     history_msgs: List[Dict[str, str]] = [
         {"role": turn.role, "content": turn.content} for turn in (req.history or [])
     ]
+    from app.agent.context_assembler import selection_context_user_message
     from app.agent.user_context import build_initial_user_message_from_tables
 
-    current_user = build_initial_user_message_from_tables(req.prompt, tables)
-    transcript: List[Dict[str, Any]] = list(history_msgs) + [current_user]
+    request_context = req.context
+    user_prompt = req.prompt
+    clarification_reply = (req.clarificationReply or "").strip()
+    if clarification_reply:
+        from app.agent.clarification_telemetry import log_clarification_resolved
+
+        log_clarification_resolved(
+            reply=clarification_reply,
+            turn_id=(req.clarificationTurnId or None),
+        )
+        user_prompt = _strip_clarification_prompt_suffix(user_prompt)
+        if not (
+            history_msgs
+            and history_msgs[-1].get("role") == "user"
+            and history_msgs[-1].get("content") == clarification_reply
+        ):
+            history_msgs = history_msgs + [
+                {"role": "user", "content": clarification_reply}
+            ]
+
+    current_user = build_initial_user_message_from_tables(user_prompt, tables)
+    transcript: List[Dict[str, Any]] = list(history_msgs)
+    selection_msg = selection_context_user_message(request_context)
+    if selection_msg is not None:
+        transcript.append(selection_msg)
+    transcript.append(current_user)
     return AgentState(
         tables=tables,
         messages=transcript,
         applied_plans_summary=req.appliedPlansSummary,
         conversation=transcript,
-        user_prompt=req.prompt,
+        user_prompt=user_prompt,
         model_source=req.modelSource or "cloud",
         cloud_model_id=req.cloudModelId,
         local_model_id=req.localModelId,
         preview_history=list(req.previewHistory or []),
         revision_count=int(req.revisionCount or 0),
         last_execution_error=req.lastExecutionError,
+        request_context=request_context,
     )

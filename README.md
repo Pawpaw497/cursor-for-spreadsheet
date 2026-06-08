@@ -85,10 +85,15 @@ flowchart LR
    - 后端提供 `/api/agent`：基于同一份多表上下文，使用多轮 LLM + 工具（schema / 样本 / 列统计 / 表达式校验等）生成计划，并在遇到歧义时返回「澄清问题」而不是直接执行。
    - 提供 `/api/agent-stream`（SSE）：以流式事件（`tool_call` / `tool_result` / `plan_done` / `finish` / `clarification`）推送 Agent 执行过程，便于前端实时展示「模型在做什么」。
    - **Agent 澄清（clarification）**：
-     - **何时触发（当前）**：多表项目且 Plan 含 `add_column` 或 `transform_column` 步骤但未带 `table` 字段时，由规则 `maybe_need_clarification`（`server/app/agent/agent_helpers.py`）在 Plan 产出后拦截并返回澄清，**非** LLM 原生追问。
+     - **何时触发（当前）**：多表项目且 Plan 含 `add_column` 或 `transform_column` 步骤但未带 `table` 字段时，或由规则检测「列名在多表重复且步骤未指定 `table`」（如 `sort_table`）；规则位于 `server/app/agent/clarification.py`（`maybe_need_clarification`），在 Plan 产出后拦截并返回澄清，**非** LLM 原生追问。
      - **响应形状**：`kind: "clarification"`，正文含 `clarification.question`、`clarification.options`（常为表名列表）、`clarification.context`；**无** `plan`（字段为 `null` 或省略）。
+     - **续跑请求（Phase 2）**：`AgentProjectPlanRequest` 可选字段 `clarificationReply`（用户答案）与 `clarificationTurnId`；服务端将其作为 `user` 消息并入 `state.messages`，`prompt` 仍为主意图（会剥离客户端 `[Clarification]` 后缀）。前端 `submitClarificationAnswer` 优先发送 `clarificationReply` 而非仅拼接 prompt。
      - **交互约定（Phase 1 前端）**：用户应**回答澄清**（点选 `options` 或简短回复），而不是把整条 Cmd+K 指令重写一遍；续跑时前端会保留原 `prompt` 并把澄清 Q/A 写入 `history` 再调 `/api/agent`。
-     - **计划与测试**：实现路线图见 [`.cursor/plans/agent-clarification-loop.plan.md`](.cursor/plans/agent-clarification-loop.plan.md)；HTTP 映射回归见 `server/tests/test_agent_clarification_route.py`。Cursor 式选项 chips UI 属 Phase 1，尚未落地。
+     - **SSE / 技术历史**：`client/src/agentStream.ts` 提供 `consumeAgentStream` 解析 `/api/agent-stream`；`client/src/agentProjectPlan.ts` 的 `requestAgentProjectPlanViaStream` 将终端事件映射为与 `/api/agent` 相同的 `AgentProjectPlanResult`。澄清终端事件写入 History 标签（`mode: agent_clarification`）。开发环境可通过 `window.__spreadsheetCursorConsumeAgentStream` 调用。
+     - **客户端结构化日志**：收到澄清时 `logInfo("agent_clarification", { traceId, source, optionsCount, hasContext, questionPreview })`；用户回答并成功续跑时 `logInfo("clarification_resolved", { traceId, clarificationTurnId, answerLength, resultKind, success })`（失败时 `success: false`）。
+     - **可选 SSE Generate**：在 `client/.env` 设置 `VITE_AGENT_USE_STREAM=true` 后，多表 **Generate Plan** 走 `/api/agent-stream` 而非同步 `/api/agent`；默认关闭，行为不变。
+     - **计划与测试**：实现路线图见 [`.cursor/plans/agent-clarification-loop.plan.md`](.cursor/plans/agent-clarification-loop.plan.md)；HTTP 映射回归见 `server/tests/test_agent_clarification_route.py`，`clarificationReply` 见 `server/tests/test_agent_clarification_reply.py`，规则单测见 `server/tests/test_clarification.py`。
+   - **显式上下文包（Stage 4）**：Agent 请求可选 `context`（当前表、网格选区/焦点列、工作区 rules）；rules 存于浏览器 `localStorage`，详见 [`docs/agent-memory.md`](docs/agent-memory.md)。
 8. **多表 Agent 预览生命周期（可选 `previewLifecycle`）**：
    - **多表 / 项目模式**下，「Generate Plan」走 `/api/agent`，请求体带 `previewLifecycle: true`；有 `projectId` 时服务端从 `ProjectState` 克隆表做 dry-run，无 `projectId` 时需同时传 `previewTables`（全量行）以便服务端在副本上执行计划。
    - 无 `projectId` 时，`previewTables` 每张表最多 **5000** 行：超出部分在前端序列化与后端 `execution_tables_from_execute_tables` 中截断并记 warning，避免超大 JSON 触发反代 body 限制或内存尖峰（常量：`client` 的 `PREVIEW_TABLES_MAX_ROWS_PER_TABLE` 与后端 `PREVIEW_TABLES_MAX_ROWS_PER_TABLE` 须保持一致）。

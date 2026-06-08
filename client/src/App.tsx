@@ -8,6 +8,7 @@ import "ag-grid-community/styles/ag-theme-quartz.css";
 
 import type { CellFormat, Diff, Plan, PreviewRecord, SchemaCol, TableData } from "./types";
 import { applyProjectPlan, inferSchema } from "./engine";
+import { requestAgentProjectPlanViaStream } from "./agentProjectPlan";
 import {
   exportProjectToExcel,
   executePlanOnServer,
@@ -22,9 +23,12 @@ import {
 } from "./llm";
 import type { ChatMessage, ConfigResponse, ModelOption } from "./llm";
 import { ClarificationBubble } from "./ClarificationBubble";
+import { buildAgentRequestContext } from "./agentContext";
 import {
-  buildClarificationResumeHistory,
-  buildClarificationResumePrompt,
+  buildClarificationTechnicalHistoryEntry,
+  type AgentClarificationHistoryPayload
+} from "./agentStream";
+import {
   truncatePromptAnchor,
   type PendingClarification,
   type PendingClarificationSource
@@ -34,8 +38,9 @@ import {
   debouncedSaveWorkspaceMemory,
   flushDebouncedWorkspaceMemorySave,
   appendApplyLogEntry,
-  buildAgentHistoryFromTranscript,
-  chatToAgentTranscript,
+  appendClarificationAnswerToTranscript,
+  appendClarificationQuestionToTranscript,
+  buildAgentHistoryForRequest,
   createApplyLogEntry,
   emptyWorkspaceMemory,
   formatLastApplyHint,
@@ -59,6 +64,7 @@ import {
   loadWorkspaceHistory,
   workspaceHistoryHasContent
 } from "./workspaceHistoryStorage";
+import { loadWorkspaceRules, saveWorkspaceRules } from "./workspaceRulesStorage";
 
 const initialModelPreference = loadModelPreference();
 
@@ -72,6 +78,8 @@ type ConversationEntry = {
   modelSource: "cloud" | "local";
   modelId: string | null;
   modelTag?: string;
+  mode?: "agent_clarification";
+  clarification?: AgentClarificationHistoryPayload;
 };
 
 /** Excel 风格列名：0→A, 1→B, …, 26→AA */
@@ -303,6 +311,7 @@ export default function App() {
   const [workspaceSessionId, setWorkspaceSessionId] = useState<string | null>(null);
   const [showBackendRestartBanner, setShowBackendRestartBanner] = useState(false);
   const [gridSelectionSummary, setGridSelectionSummary] = useState<string | null>(null);
+  const [workspaceRules, setWorkspaceRules] = useState("");
   const [activeWorkspaceKey, setActiveWorkspaceKey] = useState<string | null>(null);
   const [serverBootId, setServerBootId] = useState<string | null>(null);
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
@@ -377,6 +386,7 @@ export default function App() {
       flushDebouncedWorkspaceHistorySave();
       setActiveWorkspaceKey(workspaceKey);
       hydrateWorkspaceMemory(workspaceKey, serverBootId);
+      setWorkspaceRules(loadWorkspaceRules(workspaceKey));
     },
     [hydrateWorkspaceMemory, serverBootId]
   );
@@ -661,6 +671,18 @@ export default function App() {
     };
   }, [activeWorkspaceKey, conversations]);
 
+  useEffect(() => {
+    if (!activeWorkspaceKey) {
+      return;
+    }
+    saveWorkspaceRules(activeWorkspaceKey, workspaceRules);
+  }, [activeWorkspaceKey, workspaceRules]);
+
+  const buildAgentContextPayload = useCallback(
+    () => buildAgentRequestContext(activeTable, gridRef.current, workspaceRules),
+    [activeTable, workspaceRules]
+  );
+
   const toggleResponseExpanded = useCallback((id: number) => {
     setExpandedResponseIds((prev) => {
       const next = new Set(prev);
@@ -749,7 +771,7 @@ export default function App() {
   }, [diff, newTablesPreview]);
 
   function chatMessagesToAgentHistory(): { role: "user" | "assistant"; content: string }[] {
-    return buildAgentHistoryFromTranscript(chatToAgentTranscript(chatMessages));
+    return buildAgentHistoryForRequest(workspaceMemoryRef.current, chatMessages);
   }
 
   function recordAppliedPlan(plan: Plan, promptText?: string, diffSnapshot: Diff | null = diff) {
@@ -943,6 +965,14 @@ export default function App() {
       source
     });
     appendClarificationChatMessage(clarification);
+    workspaceMemoryRef.current = appendClarificationQuestionToTranscript(
+      workspaceMemoryRef.current,
+      clarification.question,
+      clarification.context
+    );
+    if (activeWorkspaceKey) {
+      debouncedSaveWorkspaceMemory(activeWorkspaceKey, workspaceMemoryRef.current);
+    }
     setStatus(
       `需要澄清：${clarification.question}` +
         (clarification.options?.length
@@ -950,11 +980,31 @@ export default function App() {
           : "")
     );
     setPrompt("");
+    logInfo("agent_clarification", {
+      traceId,
+      source,
+      optionsCount: clarification.options?.length ?? 0,
+      hasContext: Boolean(clarification.context?.trim()),
+      questionPreview: clarification.question.slice(0, 120)
+    });
     logInfo("plan_response", {
       traceId,
       success: true,
       stepsCount: 0,
       mode: "agent_clarification"
+    });
+    const activeModelId = modelSource === "cloud" ? cloudModelId : localModelId;
+    setConversations((prev) => {
+      const nextId = (prev[0]?.id ?? 0) + 1;
+      const entry = buildClarificationTechnicalHistoryEntry(clarification, {
+        nextId,
+        prompt: originalPrompt,
+        requestPayload: { prompt: originalPrompt, traceId },
+        modelSource,
+        modelId: activeModelId,
+        modelTag: buildModelTag(modelSource, activeModelId)
+      });
+      return [entry as ConversationEntry, ...prev];
     });
   }
 
@@ -971,25 +1021,28 @@ export default function App() {
 
     const traceId = generateTraceId();
     appendClarificationUserMessage(trimmed);
+    workspaceMemoryRef.current = appendClarificationAnswerToTranscript(
+      workspaceMemoryRef.current,
+      trimmed
+    );
+    if (activeWorkspaceKey) {
+      debouncedSaveWorkspaceMemory(activeWorkspaceKey, workspaceMemoryRef.current);
+    }
     setPrompt("");
     setStatus(modelSource === "cloud" ? "Calling cloud LLM…" : "Calling local LLM…");
 
-    const filtered = chatMessages.filter(
-      (m) => m.role === "user" || m.role === "assistant"
+    const resumeHistory = buildAgentHistoryForRequest(
+      workspaceMemoryRef.current,
+      chatMessages
     );
-    const resumeHistory = buildClarificationResumeHistory(
-      chatToAgentTranscript(filtered.slice(0, -1)),
-      pending.question,
-      pending.context,
-      trimmed
-    );
-    const resumePrompt = buildClarificationResumePrompt(pending.originalPrompt, trimmed);
 
     try {
       const tablesArr = Object.values(tables);
       const usingProjectApi = !!projectId;
       const agentRes = await requestAgentProjectPlan({
-        prompt: resumePrompt,
+        prompt: pending.originalPrompt,
+        clarificationReply: trimmed,
+        clarificationTurnId: pending.traceId,
         tables: tablesArr,
         modelSource,
         cloudModelId: modelSource === "cloud" ? cloudModelId : undefined,
@@ -1003,7 +1056,8 @@ export default function App() {
         previewTables: usingProjectApi ? undefined : tablesArr,
         previewHistory: agentPreviewHistory,
         revisionCount: agentRevisionCount,
-        signal: takeAgentLlmAbortSignal()
+        signal: takeAgentLlmAbortSignal(),
+        context: buildAgentContextPayload()
       });
 
       if (agentRes.kind === "clarification") {
@@ -1022,6 +1076,13 @@ export default function App() {
         const nextPlan = agentRes.plan;
         setPendingServerPreviewId(null);
         setPlan(nextPlan);
+        logInfo("clarification_resolved", {
+          traceId,
+          clarificationTurnId: pending.traceId,
+          answerLength: trimmed.length,
+          resultKind: agentRes.kind,
+          success: true
+        });
         logInfo("plan_response", {
           traceId,
           success: true,
@@ -1051,6 +1112,13 @@ export default function App() {
         const st = agentRes.state;
         const rc = Number(st.revision_count ?? st.revisionCount ?? 0);
         setAgentRevisionCount(Number.isFinite(rc) ? rc : 0);
+        logInfo("clarification_resolved", {
+          traceId,
+          clarificationTurnId: pending.traceId,
+          answerLength: trimmed.length,
+          resultKind: agentRes.kind,
+          success: true
+        });
         logInfo("plan_response", {
           traceId,
           success: true,
@@ -1062,10 +1130,22 @@ export default function App() {
         return;
       }
 
+      logInfo("clarification_resolved", {
+        traceId,
+        clarificationTurnId: pending.traceId,
+        answerLength: trimmed.length,
+        success: false
+      });
       setStatus("Unexpected agent response after clarification.");
     } catch (e: unknown) {
       const msg = String((e as Error)?.message ?? e);
       const { technical } = splitApiErrorDetail(msg);
+      logInfo("clarification_resolved", {
+        traceId,
+        clarificationTurnId: pending.traceId,
+        answerLength: trimmed.length,
+        success: false
+      });
       logError("clarification_resume_error", {
         traceId,
         message: msg,
@@ -1117,7 +1197,7 @@ export default function App() {
           cloudModelId: modelSource === "cloud" ? cloudModelId : undefined,
           localModelId: modelSource === "local" ? localModelId : undefined
         };
-        const agentRes = await requestAgentProjectPlan({
+        const agentOpts = {
           prompt,
           tables: tablesArr,
           modelSource,
@@ -1132,8 +1212,13 @@ export default function App() {
           previewTables: usingProjectApi ? undefined : tablesArr,
           previewHistory: agentPreviewHistory,
           revisionCount: agentRevisionCount,
-          signal: takeAgentLlmAbortSignal()
-        });
+          signal: takeAgentLlmAbortSignal(),
+          context: buildAgentContextPayload()
+        };
+        const useAgentStream = import.meta.env.VITE_AGENT_USE_STREAM === "true";
+        const agentRes = useAgentStream
+          ? await requestAgentProjectPlanViaStream(agentOpts)
+          : await requestAgentProjectPlan(agentOpts);
         if (agentRes.kind === "clarification") {
           receiveAgentClarification(agentRes.clarification, prompt, traceId, "generate");
           return;
@@ -1320,7 +1405,8 @@ export default function App() {
             previewDecision: "confirm",
             previewId: pendingServerPreviewId,
             commitPlan: plan,
-            signal: takeAgentLlmAbortSignal()
+            signal: takeAgentLlmAbortSignal(),
+            context: buildAgentContextPayload()
           });
           if (res.kind !== "committed") {
             setStatus("确认失败：服务器未返回 committed。");
@@ -1403,7 +1489,8 @@ export default function App() {
         revisionCount: agentRevisionCount,
         previewDecision: "abort",
         previewId: pendingServerPreviewId,
-        signal: takeAgentLlmAbortSignal()
+        signal: takeAgentLlmAbortSignal(),
+        context: buildAgentContextPayload()
       });
       if (res.kind !== "preview_aborted") {
         setStatus("Abort 失败：响应异常。");
@@ -1453,7 +1540,8 @@ export default function App() {
         previewDecision: "revise",
         previewId: pendingServerPreviewId,
         revisionMessage: extra,
-        signal: takeAgentLlmAbortSignal()
+        signal: takeAgentLlmAbortSignal(),
+        context: buildAgentContextPayload()
       });
       if (agentRes.kind === "preview_ready") {
         const nextPlan = agentRes.plan;
@@ -2046,6 +2134,16 @@ export default function App() {
                       </select>
                     )}
                   </div>
+                  <details className="workspace-rules-panel small">
+                    <summary>Workspace rules (optional)</summary>
+                    <textarea
+                      className="workspace-rules-textarea"
+                      value={workspaceRules}
+                      onChange={(e) => setWorkspaceRules(e.target.value)}
+                      placeholder="e.g. Always use ISO dates; round currency to 2 decimals."
+                      rows={3}
+                    />
+                  </details>
                   <div className="cmdk-context-strip small" aria-label="Cmd+K context">
                     <span>表: {activeTable}</span>
                     {gridSelectionSummary ? <span> · {gridSelectionSummary}</span> : null}
@@ -2175,6 +2273,26 @@ export default function App() {
                         </div>
                         {expandedPayloadIds.has(item.id) && (
                           <pre>{JSON.stringify(item.payload, null, 2)}</pre>
+                        )}
+                        {expandedResponseIds.has(item.id) && item.mode === "agent_clarification" && item.clarification && (
+                          <>
+                            <div style={{ fontWeight: 600, marginTop: 4 }}>Clarification</div>
+                            <div className="small" style={{ marginTop: 4 }}>
+                              <strong>Question：</strong> {item.clarification.question}
+                            </div>
+                            {item.clarification.options && item.clarification.options.length > 0 && (
+                              <div className="small" style={{ marginTop: 4 }}>
+                                <strong>Options：</strong>{" "}
+                                {item.clarification.options.join(" / ")}
+                              </div>
+                            )}
+                            {item.clarification.context && (
+                              <>
+                                <div style={{ fontWeight: 600, marginTop: 8 }}>Context</div>
+                                <pre>{item.clarification.context}</pre>
+                              </>
+                            )}
+                          </>
                         )}
                         {expandedResponseIds.has(item.id) && item.plan && (
                           <>

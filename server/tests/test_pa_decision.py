@@ -222,6 +222,42 @@ def test_pa_decision_clarification_multi_table() -> None:
     asyncio.run(run())
 
 
+def test_pa_decision_clarification_ambiguous_column() -> None:
+    """sort_table on duplicate column name without table triggers clarification."""
+    plan = Plan.model_validate(
+        {
+            "intent": "sort",
+            "steps": [
+                {
+                    "action": "sort_table",
+                    "column": "price",
+                    "order": "ascending",
+                }
+            ],
+        }
+    )
+    schema = [{"key": "price", "type": "number"}]
+    state = AgentState(
+        tables=[
+            TableContext(name="Sheet1", schema=schema, sample_rows=[{"price": 1}]),
+            TableContext(name="Sheet2", schema=schema, sample_rows=[{"price": 2}]),
+        ],
+        messages=[],
+        user_prompt="sort price",
+    )
+
+    async def run() -> None:
+        with patch(
+            "app.agent.pa_decision._run_pa_single_turn",
+            return_value=_turn_plan(plan),
+        ):
+            _, action = await pa_decision_step(state, use_tools=True)
+            assert isinstance(action, AskClarificationAction)
+            assert "multiple tables" in action.payload.question.lower()
+
+    asyncio.run(run())
+
+
 def test_pa_decision_tool_append_message_shape() -> None:
     """Parity with test_agent_message_shape: tool path seeds user context."""
     from app.agent.agent_helpers import run_tool_and_append_messages

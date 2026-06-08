@@ -8,6 +8,7 @@ import {
   appendApplyLogEntry,
   appendClarificationToTranscript,
   buildAppliedPlansSummaryFromLog,
+  buildAgentHistoryForRequest,
   buildAgentHistoryFromTranscript,
   chatToAgentTranscript,
   createApplyLogEntry,
@@ -221,6 +222,120 @@ describe("workspaceMemory", () => {
     expect(next.agentTranscript).toHaveLength(3);
     expect(next.agentTranscript[1]!.content).toBe("[Clarification] Which table?");
     expect(next.agentTranscript[2]!.content).toBe("Sheet2");
+  });
+
+  it("buildAgentHistoryForRequest prefers agentTranscript over chat", () => {
+    const chat: ChatMessage[] = [
+      {
+        id: "u1",
+        sessionId: "boot",
+        role: "user",
+        content: "from chat only",
+        createdAt: "t",
+        source: "live"
+      }
+    ];
+    const memory = {
+      version: 1,
+      chatTranscript: chat,
+      agentTranscript: [
+        { role: "user" as const, content: "persisted turn" },
+        {
+          role: "assistant" as const,
+          content: "[Clarification] Which table?\nAmbiguous"
+        },
+        { role: "user" as const, content: "Sheet1" }
+      ],
+      applyLog: [],
+      previewHistory: [],
+      appliedPlansSummary: "",
+      sessionMeta: {
+        sessionId: "s",
+        lastServerBootId: null,
+        schemaFingerprint: null
+      }
+    };
+    const history = buildAgentHistoryForRequest(memory, chat);
+    expect(history).toHaveLength(3);
+    expect(history[0]!.content).toBe("persisted turn");
+    expect(history[1]!.content).toContain("[Clarification]");
+    expect(history).not.toContainEqual({ role: "user", content: "from chat only" });
+  });
+
+  it("buildAgentHistoryForRequest falls back to chat when agentTranscript empty", () => {
+    const chat: ChatMessage[] = [
+      {
+        id: "u1",
+        sessionId: "boot",
+        role: "user",
+        content: "hello",
+        createdAt: "t",
+        source: "live"
+      }
+    ];
+    const memory = {
+      version: 1,
+      chatTranscript: chat,
+      agentTranscript: [],
+      applyLog: [],
+      previewHistory: [],
+      appliedPlansSummary: "",
+      sessionMeta: {
+        sessionId: "s",
+        lastServerBootId: null,
+        schemaFingerprint: null
+      }
+    };
+    expect(buildAgentHistoryForRequest(memory, chat)).toEqual(
+      chatToAgentTranscript(chat)
+    );
+  });
+
+  it("syncAgentTranscriptFromChat appends new chat tail when agentTranscript exists", () => {
+    const priorChat: ChatMessage[] = [
+      {
+        id: "u1",
+        sessionId: "boot",
+        role: "user",
+        content: "hi",
+        createdAt: "t",
+        source: "live"
+      }
+    ];
+    const memory = {
+      version: 1,
+      chatTranscript: priorChat,
+      agentTranscript: [
+        { role: "user" as const, content: "hi" },
+        {
+          role: "assistant" as const,
+          content: "[Clarification] Which table?"
+        }
+      ],
+      applyLog: [],
+      previewHistory: [],
+      appliedPlansSummary: "",
+      sessionMeta: {
+        sessionId: "s",
+        lastServerBootId: null,
+        schemaFingerprint: null
+      }
+    };
+    const extendedChat: ChatMessage[] = [
+      ...priorChat,
+      {
+        id: "a1",
+        sessionId: "boot",
+        role: "assistant",
+        content: "hello",
+        createdAt: "t2",
+        source: "live"
+      }
+    ];
+    const synced = syncAgentTranscriptFromChat(memory, extendedChat);
+    expect(synced.agentTranscript).toHaveLength(3);
+    expect(synced.agentTranscript[1]!.content).toBe("[Clarification] Which table?");
+    expect(synced.agentTranscript[2]!.content).toBe("hello");
   });
 
   it("syncAgentTranscriptFromChat mirrors user and assistant turns", () => {
