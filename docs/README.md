@@ -21,7 +21,10 @@ Canonical reference for **spreadsheet-cursor-mvp**, a personal side project unde
 | [architecture.md](./architecture.md) | Full-stack | Components, API surface, plan execution paths, observability |
 | [plan-step-types-reference.md](./plan-step-types-reference.md) | LLM / backend / frontend | Plan JSON contract: every `action`, fields, and semantics |
 | [agent-preview-lifecycle.md](./agent-preview-lifecycle.md) | Agent / API | Server-side preview, confirm / abort / revise, fingerprints |
-| [client-storage.md](./client-storage.md) | Frontend | Browser `sessionStorage` / `localStorage` keys and privacy |
+| [agent-memory.md](./agent-memory.md) | Agent / frontend / backend | Workspace memory schema, prompt injection, compaction, optional server session store |
+| [client-storage.md](./client-storage.md) | Frontend | Browser `localStorage` keys, workspace memory, session sync, privacy |
+| [agent-improvements.md](./agent-improvements.md) | Agent roadmap | Historical upgrade notes; see banner for what is already shipped |
+| [trouble-shoot.md](./trouble-shoot.md) | Developers | Known issues and common pitfalls |
 | [PRODUCT_BRIEF.md](./PRODUCT_BRIEF.md) | Personal planning | Open-source readiness milestone, backlog |
 | [getting-started.md](./getting-started.md) | Setup | Full Quick Start beyond root README |
 | [features.md](./features.md) | Users / devs | MVP features, Agent clarification, preview |
@@ -37,13 +40,16 @@ Canonical reference for **spreadsheet-cursor-mvp**, a personal side project unde
 | Plan execution (server) | `server/app/services/plan_executor.py` |
 | LLM prompts / step rules | `server/app/services/prompt_content.py` |
 | Agent orchestration | `server/app/agent/orchestrator.py`, `pa_decision.py`, `pa_tools.py` |
+| Agent memory / compaction | `server/app/agent/memory_context.py`, `memory_compaction.py`, `context_assembler.py` |
 | Agent preview | `server/app/services/agent_preview.py` |
+| Session memory (optional) | `server/app/api/routes/sessions.py`, `services/session_store.py` |
+| Workspace memory (client) | `client/src/workspaceMemory.ts`, `sessionMemorySync.ts`, `memoryCompaction.ts` |
 
 ## What is not here
 
 - **Maintainer backlog**: local `.cursor/plans/` (gitignored); use [PRODUCT_BRIEF.md](./PRODUCT_BRIEF.md) for published milestone notes.
 - **Personal notes**: optional `docs/local/` (gitignored).
-- **Runbooks**: dev start and test commands in [README](../README.md) (§ 快速开始, § 开发与测试).
+- **Runbooks**: dev start and test commands in [README](../README.md) (§ 快速开始, § 开发与测试); pitfalls in [trouble-shoot.md](./trouble-shoot.md).
 
 ## When you change the codebase
 

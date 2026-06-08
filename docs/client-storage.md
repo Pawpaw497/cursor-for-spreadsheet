@@ -27,6 +27,24 @@ On first load, migrates once from legacy `sessionStorage` chat keys and recent w
 
 Saves are debounced (500 ms).
 
+**Compaction (Stage 5):** `memoryCompaction.ts` trims long `agentTranscript` / Agent `history` before each request (middle-out; defaults 24 chat turns / 12 tool rows). See [`agent-memory.md`](agent-memory.md).
+
+**Server sync (Stage 6, optional):** When `/api/config` returns `sessionMemoryEnabled: true` (`SESSION_MEMORY_DB_ENABLED=1`):
+
+- `sessionMemorySync.ts` hydrates from `GET /api/sessions/{sessionId}` on workspace activate (after config is known).
+- Debounced `PUT` after memory changes and Apply; LWW merge on `localUpdatedAt` vs server `updatedAt`.
+- `sessionMeta.serverVersion` tracks optimistic concurrency for PUT (`expectedVersion`); persisted in `localStorage` after successful sync.
+
+## Workspace rules (`localStorage`)
+
+**Module**: `client/src/workspaceRulesStorage.ts`
+
+| Item | Value |
+|------|--------|
+| Key pattern | `spreadsheet-cursor:rules:<workspaceKey>` |
+| Scope | Per workspace |
+| Sent to API | `context.workspaceRules` on Agent requests (Stage 4) |
+
 ## Legacy chat bubbles (`sessionStorage`) — migrated
 
 **Module**: `client/src/backendSessionChatStorage.ts`
@@ -85,9 +103,10 @@ This is separate from per-conversation `modelTag` in workspace history (which re
 
 ## Related server concepts
 
-- Preview history compact records travel in API bodies (`previewHistory`), not in localStorage.
+- Preview history compact records travel in API bodies (`previewHistory`), mirrored in `workspaceMemory.previewHistory`.
 - Project-backed tables use `projectId` on the server; workspace key is still used for client history partitioning.
+- Optional `session_memory` SQLite table backs the same `WorkspaceMemory` shape when Stage 6 is enabled — see [`agent-memory.md`](agent-memory.md).
 
 ## Server audit DB (not client memory)
 
-The backend may persist HTTP and LLM traffic to a local SQLite file (`AUDIT_DB_*` in `server/.env`). That audit store is for **debugging and replay**, not for restoring the UI history panels above. Client memory remains browser-first; audit rows are not fed into prompts unless you explicitly add compressed memory fields (e.g. `appliedPlansSummary`) in API requests.
+The backend may persist HTTP and LLM traffic to a local SQLite file (`AUDIT_DB_*` in `server/.env`). That audit store is for **debugging and replay**, not for restoring the UI history panels above. Client memory remains browser-first; audit rows are not fed into prompts. Compaction and memory blocks use `appliedPlansSummary` / apply log only — never audit tables.

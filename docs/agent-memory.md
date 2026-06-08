@@ -147,12 +147,23 @@ Browser-first `WorkspaceMemory` remains SSOT; optional SQLite backup enables mul
 ### Frontend
 
 - `client/src/sessionMemorySync.ts`: hydrate merge (LWW on `localUpdatedAt` vs server `updatedAt`), debounced PUT after memory changes and Apply.
+- Hydration runs **after** `/api/config` confirms `sessionMemoryEnabled` (avoids 503 noise when store is off).
+- `sessionMeta.serverVersion` persisted in `localStorage` after successful PUT; sent as `expectedVersion` for optimistic concurrency (409 → client retries on next debounced sync).
 - On workspace activate: fetch server session when enabled; empty localStorage can restore chat within TTL.
 
 **Enable:** set `SESSION_MEMORY_DB_ENABLED=1` in `server/.env` and restart backend.
 
-## Clarification Phase 3 (agent transcript + selection-aware gates)
+## Clarification and agent transcript
+
+### Phase 3 — Transcript + selection-aware gates
 
 - **`buildAgentHistoryForRequest`**: Agent `history` prefers persisted `workspaceMemory.agentTranscript` (includes `[Clarification]` Q/A formatting); falls back to chat-derived transcript only when `agentTranscript` is empty.
 - **Clarification persistence**: `receiveAgentClarification` / `submitClarificationAnswer` append formatted Q and A turns to `agentTranscript` directly; `syncAgentTranscriptFromChat` is append-only when a transcript already exists so clarification turns are not dropped.
 - **Selection-aware clarification skip**: `maybe_need_clarification` reads `state.request_context`; when `activeTable` (and matching `focusedColumn` or single-column `selectedRange`) disambiguates multi-table column refs or write steps missing `table`, deterministic clarification is skipped.
+
+### Phase 4 — LLM-native `ask_user` tool
+
+- PA exposes `ask_user` in `pa_tools.py`; `pa_decision_step` maps a valid tool call to `AskClarificationAction` (`source=ask_user` in telemetry).
+- Runs **before** final Plan output when the model judges intent ambiguous; distinct from post-plan `maybe_need_clarification` gate on validated Plan JSON.
+- Invalid `ask_user` args trigger one in-loop retry with feedback (same pattern as spreadsheet tools).
+- Structured logs: `server/app/agent/clarification_telemetry.py` (`agent_clarification`, `clarification_resolved` when `clarificationReply` is merged in `agent_models.py`).
