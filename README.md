@@ -94,6 +94,7 @@ flowchart LR
      - **可选 SSE Generate**：在 `client/.env` 设置 `VITE_AGENT_USE_STREAM=true` 后，多表 **Generate Plan** 走 `/api/agent-stream` 而非同步 `/api/agent`；默认关闭，行为不变。
      - **计划与测试**：实现路线图见 [`.cursor/plans/agent-clarification-loop.plan.md`](.cursor/plans/agent-clarification-loop.plan.md)；HTTP 映射回归见 `server/tests/test_agent_clarification_route.py`，`clarificationReply` 见 `server/tests/test_agent_clarification_reply.py`，规则单测见 `server/tests/test_clarification.py`。
    - **显式上下文包（Stage 4）**：Agent 请求可选 `context`（当前表、网格选区/焦点列、工作区 rules）；rules 存于浏览器 `localStorage`，详见 [`docs/agent-memory.md`](docs/agent-memory.md)。
+   - **记忆压缩（Stage 5）**：长对话在服务端 `memory_compaction.py` 与客户端 `memoryCompaction.ts` 中按 middle-out 策略裁剪（默认 24 轮聊天 / 12 条 tool 行），详见 [`docs/agent-memory.md`](docs/agent-memory.md)。
 8. **多表 Agent 预览生命周期（可选 `previewLifecycle`）**：
    - **多表 / 项目模式**下，「Generate Plan」走 `/api/agent`，请求体带 `previewLifecycle: true`；有 `projectId` 时服务端从 `ProjectState` 克隆表做 dry-run，无 `projectId` 时需同时传 `previewTables`（全量行）以便服务端在副本上执行计划。
    - 无 `projectId` 时，`previewTables` 每张表最多 **5000** 行：超出部分在前端序列化与后端 `execution_tables_from_execute_tables` 中截断并记 warning，避免超大 JSON 触发反代 body 限制或内存尖峰（常量：`client` 的 `PREVIEW_TABLES_MAX_ROWS_PER_TABLE` 与后端 `PREVIEW_TABLES_MAX_ROWS_PER_TABLE` 须保持一致）。

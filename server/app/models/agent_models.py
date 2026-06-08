@@ -156,6 +156,7 @@ def initial_state_from_agent_project_request(req: Any) -> AgentState:
     history_msgs: List[Dict[str, str]] = [
         {"role": turn.role, "content": turn.content} for turn in (req.history or [])
     ]
+    from app.agent.memory_compaction import compact_agent_messages
     from app.agent.context_assembler import selection_context_user_message
     from app.agent.user_context import build_initial_user_message_from_tables
 
@@ -178,6 +179,12 @@ def initial_state_from_agent_project_request(req: Any) -> AgentState:
             history_msgs = history_msgs + [
                 {"role": "user", "content": clarification_reply}
             ]
+
+    history_msgs = compact_agent_messages(
+        history_msgs,
+        applied_plans_summary=req.appliedPlansSummary,
+        preserve_tail_count=0,
+    )
 
     current_user = build_initial_user_message_from_tables(user_prompt, tables)
     transcript: List[Dict[str, Any]] = list(history_msgs)

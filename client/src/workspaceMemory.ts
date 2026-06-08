@@ -1,4 +1,5 @@
 import { formatClarificationAssistantContent } from "./clarification";
+import { compactAgentTranscript } from "./memoryCompaction";
 import type { ChatMessage } from "./llm";
 import type { Diff, Plan, PreviewRecord } from "./types";
 import {
@@ -256,9 +257,18 @@ export function appendClarificationToTranscript(
 
 export function buildAgentHistoryFromTranscript(
   agentTranscript: AgentTurn[],
-  maxTurns = 24
+  maxTurns = 24,
+  opts?: {
+    applyLog?: AppliedPlanEntry[];
+    appliedPlansSummary?: string;
+  }
 ): AgentTurn[] {
-  return agentTranscript.slice(-maxTurns);
+  return compactAgentTranscript(
+    agentTranscript,
+    opts?.applyLog ?? [],
+    opts?.appliedPlansSummary ?? "",
+    maxTurns
+  );
 }
 
 export function buildAgentHistoryForRequest(
@@ -266,10 +276,22 @@ export function buildAgentHistoryForRequest(
   chatMessages: ChatMessage[],
   maxTurns = 24
 ): AgentTurn[] {
+  const compactionOpts = {
+    applyLog: memory.applyLog,
+    appliedPlansSummary: memory.appliedPlansSummary
+  };
   if (memory.agentTranscript.length > 0) {
-    return buildAgentHistoryFromTranscript(memory.agentTranscript, maxTurns);
+    return buildAgentHistoryFromTranscript(
+      memory.agentTranscript,
+      maxTurns,
+      compactionOpts
+    );
   }
-  return buildAgentHistoryFromTranscript(chatToAgentTranscript(chatMessages), maxTurns);
+  return buildAgentHistoryFromTranscript(
+    chatToAgentTranscript(chatMessages),
+    maxTurns,
+    compactionOpts
+  );
 }
 
 function conversationToApplyLogEntry(conv: StoredConversationEntry): AppliedPlanEntry | null {

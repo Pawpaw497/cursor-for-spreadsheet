@@ -35,25 +35,25 @@ todos:
     status: completed
   - id: clarify-expand-rules
     content: "扩展 maybe_need_clarification（多列同名等）并补单元测"
-    status: pending
+    status: completed
   - id: clarify-reply-api-field
     content: "可选 AgentProjectPlanRequest.clarificationReply 由服务端并入 messages"
-    status: pending
+    status: completed
   - id: clarify-llm-native-ask
     content: "可选 PA 联合输出或 ask_user tool，映射为 ask_clarification"
-    status: pending
+    status: completed
   - id: clarify-sse-history-ui
     content: "可选 consumeAgentStream，History 标签展示 clarification 终端事件"
-    status: pending
+    status: completed
   - id: clarify-transcript-from-memory
     content: "chatMessagesToAgentHistory 优先 agentTranscript（含澄清轮次）"
-    status: pending
+    status: completed
   - id: clarify-selection-context
     content: "Agent 请求携带 activeTable/selection，降低指代不明类澄清"
-    status: pending
+    status: completed
   - id: clarify-telemetry
     content: "结构化日志 agent_clarification / clarification_resolved"
-    status: pending
+    status: completed
 ---
 
 # Agent 澄清交互闭环
