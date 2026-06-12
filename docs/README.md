@@ -2,7 +2,7 @@
 
 Canonical reference for **spreadsheet-cursor-mvp**, a personal side project under continuous development. User-facing setup and demos stay in the [repository README](../README.md).
 
-**Out of scope for agents and docs**: `docs/goals.md` (not used; do not create or cite). Milestone intent lives in [PRODUCT_BRIEF.md](./PRODUCT_BRIEF.md) and [`.cursor/plans/`](../.cursor/plans/).
+**Out of scope for agents and docs**: `docs/goals.md` (not used; do not create or cite). Milestone intent lives in [PRODUCT_BRIEF.md](./PRODUCT_BRIEF.md). Maintainer Cursor workspace (`.cursor/`) is gitignored and not in the public tree.
 
 ## Documents
 
@@ -13,6 +13,7 @@ Canonical reference for **spreadsheet-cursor-mvp**, a personal side project unde
 | [agent-preview-lifecycle.md](./agent-preview-lifecycle.md) | Agent / API | Server-side preview, confirm / abort / revise, fingerprints |
 | [client-storage.md](./client-storage.md) | Frontend | Browser `sessionStorage` / `localStorage` keys and privacy |
 | [PRODUCT_BRIEF.md](./PRODUCT_BRIEF.md) | Personal planning | Milestone template: scope, backlog, acceptance criteria |
+| [interview-simulation-transcript.md](./interview-simulation-transcript.md) | Interview prep | Mock AI Agent Developer screen: Q&A + mentor debrief (2026-06-10) |
 
 ## Source of truth in code
 
@@ -28,9 +29,9 @@ Canonical reference for **spreadsheet-cursor-mvp**, a personal side project unde
 
 ## What is not here
 
-- **Product backlog / milestones**: [`.cursor/plans/INDEX.md`](../.cursor/plans/INDEX.md) and individual `*.plan.md` files (Cursor workspace plans).
+- **Maintainer backlog**: local `.cursor/plans/` (gitignored); use [PRODUCT_BRIEF.md](./PRODUCT_BRIEF.md) for published milestone notes.
 - **Personal notes**: optional `docs/local/` (gitignored).
-- **Runbooks**: dev start commands live in [`.cursor/skills/run-project/SKILL.md`](../.cursor/skills/run-project/SKILL.md) and README § Quick start.
+- **Runbooks**: dev start and test commands in [README](../README.md) § Quick start and § 开发与测试.
 
 ## When you change the codebase
 

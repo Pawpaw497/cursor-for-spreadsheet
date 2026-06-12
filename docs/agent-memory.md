@@ -1,6 +1,6 @@
 # Agent memory contract
 
-This document defines how **workspace memory** is stored, injected into LLM prompts, and kept separate from **audit logs** and **LangGraph checkpoints**. Implementation is staged; see the [memory blueprint](../.cursor/plans/cursor-like_memory_blueprint_7f844b73.plan.md) for the full roadmap.
+This document defines how **workspace memory** is stored, injected into LLM prompts, and kept separate from **audit logs** and **LangGraph checkpoints**. Implementation is staged (Stages 0–7 below); see also [architecture.md](./architecture.md) and README § Agent memory.
 
 Browser storage details live in [`docs/client-storage.md`](client-storage.md).
 
@@ -50,7 +50,7 @@ Backend helpers: `build_memory_context_block()` in `server/app/agent/memory_cont
 | System | Stores | Used by | In prompt? |
 |--------|--------|---------|------------|
 | **Memory** (this doc, Stages 0–7) | Compressed session / workspace state | User continuity, model context | **Yes** |
-| **Audit** ([SQLite audit plan concept](../.cursor/plans/sqlite_请求审计日志_d28e8248.plan.md)) | Raw HTTP + LLM request/response/errors | Dev debug, replay | **No** |
+| **Audit** (SQLite `http_request_logs` / `llm_call_logs`; see README § SQLite 请求审计) | Raw HTTP + LLM request/response/errors | Dev debug, replay | **No** |
 | **Checkpoint** (Stage 6+ optional) | LangGraph graph runtime state | Server resume / interrupt | **Indirect** |
 
 ### Rules

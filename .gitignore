@@ -22,6 +22,9 @@ server/data/
 scripts/
 docs/local/
 
+# Cursor IDE 工作区（rules / plans / skills；仅本机，不随仓库分发）
+.cursor/
+
 # 前端依赖与构建产物（勿提交；若曾被跟踪：git rm -r --cached client/node_modules）
 client/node_modules/
 client/dist/

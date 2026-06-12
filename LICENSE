@@ -1,0 +1,41 @@
+Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
+
+Copyright (c) 2026 spreadsheet-cursor-mvp contributors
+
+You are free to:
+
+  Share — copy and redistribute the material in any medium or format
+  Adapt — remix, transform, and build upon the material
+
+Under the following terms:
+
+  Attribution — You must give appropriate credit, provide a link to the
+  license, and indicate if changes were made. You may do so in any
+  reasonable manner, but not in any way that suggests the licensor
+  endorses you or your use.
+
+  NonCommercial — You may not use the material for commercial purposes.
+
+  No additional restrictions — You may not apply legal terms or
+  technological measures that legally restrict others from doing anything
+  the license permits.
+
+Full legal text:
+https://creativecommons.org/licenses/by-nc/4.0/legalcode
+
+Human-readable summary:
+https://creativecommons.org/licenses/by-nc/4.0/
+
+---
+
+简体中文说明（非法律效力，便于理解）：
+
+本项目为作者个人学习与实践作品。你可以在保留署名、注明来源与本许可证
+的前提下，自由使用、修改与再分发本仓库代码；不得将本项目（含衍生作品）
+用于任何商业目的。商业使用须事先获得版权持有者书面许可。
+
+建议署名格式示例：
+
+  基于「Cursor for Spreadsheet」(spreadsheet-cursor-mvp) 修改
+  原项目：https://github.com/<your-org>/spreadsheet-cursor-mvp
+  许可证：CC BY-NC 4.0

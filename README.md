@@ -2,6 +2,13 @@
 
 基于 **Cmd+K 式工作流** 的表格编辑 Demo：带上下文的自然语言 → LLM 生成**结构化执行计划** → **Diff 预览** → 一键 **Apply** 写回表格。
 
+## 项目声明与许可
+
+- **性质**：作者个人学习与练手项目（初学者水平），非商业产品，不承诺生产可用性与长期维护。
+- **二次开发**：欢迎 fork、学习与在此基础上继续开发；使用时须**保留署名并注明来源**（见 [`LICENSE`](LICENSE)）。
+- **许可**：采用 [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/)——允许非商业使用、修改与再分发；**禁止商业使用**（含直接或间接营利、企业内部生产环境商用等），商业合作须另行取得作者书面许可。
+- **安全提示**：Demo 用途；`add_column` 表达式在浏览器内执行（`new Function`），对话与表格上下文可能以明文存于本机；**请勿上传敏感数据或在共享设备上使用**。
+
 ## 项目概述
 
 - **性质**：个人持续开发的 side project（非团队交付物）；阶段目标见 [`docs/PRODUCT_BRIEF.md`](docs/PRODUCT_BRIEF.md)，技术细节见 [`docs/`](docs/)。
@@ -92,7 +99,7 @@ flowchart LR
      - **SSE / 技术历史**：`client/src/agentStream.ts` 提供 `consumeAgentStream` 解析 `/api/agent-stream`；`client/src/agentProjectPlan.ts` 的 `requestAgentProjectPlanViaStream` 将终端事件映射为与 `/api/agent` 相同的 `AgentProjectPlanResult`。澄清终端事件写入 History 标签（`mode: agent_clarification`）。开发环境可通过 `window.__spreadsheetCursorConsumeAgentStream` 调用。
      - **客户端结构化日志**：收到澄清时 `logInfo("agent_clarification", { traceId, source, optionsCount, hasContext, questionPreview })`；用户回答并成功续跑时 `logInfo("clarification_resolved", { traceId, clarificationTurnId, answerLength, resultKind, success })`（失败时 `success: false`）。
      - **可选 SSE Generate**：在 `client/.env` 设置 `VITE_AGENT_USE_STREAM=true` 后，多表 **Generate Plan** 走 `/api/agent-stream` 而非同步 `/api/agent`；默认关闭，行为不变。
-     - **计划与测试**：实现路线图见 [`.cursor/plans/agent-clarification-loop.plan.md`](.cursor/plans/agent-clarification-loop.plan.md)；HTTP 映射回归见 `server/tests/test_agent_clarification_route.py`，`clarificationReply` 见 `server/tests/test_agent_clarification_reply.py`，规则单测见 `server/tests/test_clarification.py`。
+     - **测试**：HTTP 映射回归见 `server/tests/test_agent_clarification_route.py`，`clarificationReply` 见 `server/tests/test_agent_clarification_reply.py`，规则单测见 `server/tests/test_clarification.py`。
    - **显式上下文包（Stage 4）**：Agent 请求可选 `context`（当前表、网格选区/焦点列、工作区 rules）；rules 存于浏览器 `localStorage`，详见 [`docs/agent-memory.md`](docs/agent-memory.md)。
    - **记忆压缩（Stage 5）**：长对话在服务端 `memory_compaction.py` 与客户端 `memoryCompaction.ts` 中按 middle-out 策略裁剪（默认 24 轮聊天 / 12 条 tool 行），详见 [`docs/agent-memory.md`](docs/agent-memory.md)。
    - **服务端会话备份（Stage 6，可选）**：`SESSION_MEMORY_DB_ENABLED=1` 时，`GET/PUT /api/sessions/{sessionId}` 将压缩后的 `WorkspaceMemory` 写入 SQLite `session_memory` 表，支持多 tab 同步与 TTL 内从服务端恢复；默认关闭。
@@ -205,7 +212,7 @@ uv run uvicorn main:app --reload --port 8787
    - 如果调用云端模型但未配置 `OPENROUTER_API_KEY`，`/api/plan` 会返回带 `[400]` 前缀的参数错误。
    - 如果 OpenRouter Key 无效或已过期，后端会返回 `[502]` 开头的错误，前端状态栏会显示「云端 LLM 鉴权失败」的中文提示，便于排查。
    - `/api/config` 会返回 `llmUpstreamMaxTimeoutSeconds` 与 `llmClientTimeoutRecommendedMs`：前端在成功拉取配置后，对 `/api/plan`、`/api/agent` 等 LLM 请求使用该推荐毫秒超时（与后端上游 HTTP 超时 + 缓冲对齐）；在配置返回前使用与后端默认一致的回退值（当前为 150s）。
-   - **云端 LLM 稳定性（已落地）**：上游 `httpx` 超时/连接/JSON 解析失败映射为稳定 HTTP 错误（避免裸 500）；OpenRouter 响应体缺 `choices`/`content` 时显式失败；对 429/503 等可重试错误有限次指数退避；`previewTables` 行数上限与前端 `AbortSignal` 合并取消 in-flight 请求；Plan 系统提示词使用 compact JSON Schema（无缩进、去掉 description/title），后端仍以 `Plan.model_validate` 为硬校验门；进程级共享 `httpx.AsyncClient` 连接池、SSE 与同步预览修订对齐、malformed tool arguments 重试或 `invalid_tool_arguments` finish。详见 [`.cursor/plans/cloud_llm_roi_fixes_c3a77a21.plan.md`](.cursor/plans/cloud_llm_roi_fixes_c3a77a21.plan.md)。
+   - **云端 LLM 稳定性（已落地）**：上游 `httpx` 超时/连接/JSON 解析失败映射为稳定 HTTP 错误（避免裸 500）；OpenRouter 响应体缺 `choices`/`content` 时显式失败；对 429/503 等可重试错误有限次指数退避；`previewTables` 行数上限与前端 `AbortSignal` 合并取消 in-flight 请求；Plan 系统提示词使用 compact JSON Schema（无缩进、去掉 description/title），后端仍以 `Plan.model_validate` 为硬校验门；进程级共享 `httpx.AsyncClient` 连接池、SSE 与同步预览修订对齐、malformed tool arguments 重试或 `invalid_tool_arguments` finish。实现见 `server/app/services/llm.py` 与相关 `server/tests/test_llm_*.py`。
 
 ### 步骤 3：启动前端（Vite + React）
 
@@ -302,7 +309,7 @@ npm run dev
 2. 在后端终端中搜索同一字符串（或 `grep trace=<id>`）。
 3. 根据时间顺序查看：`request start` → `llm call` / `plan_request` → `request end` 与业务错误日志。
 
-技术参考见 [`docs/README.md`](docs/README.md)（Plan Step 类型、架构、Agent 预览、浏览器存储）；Agent 记忆契约见 [`docs/agent-memory.md`](docs/agent-memory.md)；Agent 预览摘要见上文 § Agent 预览生命周期；云端 LLM backlog 见 [`.cursor/plans/cloud_llm_roi_fixes_c3a77a21.plan.md`](.cursor/plans/cloud_llm_roi_fixes_c3a77a21.plan.md)；计划索引见 [`.cursor/plans/INDEX.md`](.cursor/plans/INDEX.md)。
+技术参考见 [`docs/README.md`](docs/README.md)（Plan Step 类型、架构、Agent 预览、浏览器存储）；Agent 记忆契约见 [`docs/agent-memory.md`](docs/agent-memory.md)；Agent 预览摘要见上文 § Agent 预览生命周期。
 
 ---
 
@@ -359,19 +366,25 @@ npm run dev
 
 ---
 
-## Cursor IDE（本仓库）
+## 开发与测试
 
-在 **Agent 聊天**里用 `/` 可调项目级 slash commands（定义于 [`.cursor/commands/`](.cursor/commands/)）：
+在 `server/` 目录：
 
-| 命令 | 作用 |
-|------|------|
-| `/dev` | 后台启动 API（8787）+ Vite（5173）并做 health 检查 |
-| `/test-backend` | `uv sync`、import smoke、`pytest`（Agent 回归：`uv run pytest tests/test_pa_*.py tests/test_agent_*.py -q`；默认不跑云端 E2E） |
-| `/test-client` | `client/` 下 `npm test`（Vitest） |
+```bash
+uv sync
+uv run pytest -q
+# Agent 回归子集（默认不跑云端 E2E）
+uv run pytest tests/test_pa_*.py tests/test_agent_*.py -q
+```
 
-**Custom subagent**（[`.cursor/agents/spreadsheet-agent-navigator.md`](.cursor/agents/spreadsheet-agent-navigator.md)）：在对话里写例如「用 spreadsheet-agent-navigator 查 preview abort 走哪几个文件」——子代理只读梳理 Agent 栈路径，主对话再改代码。也可在委派 UI 里选该 agent（名称 `spreadsheet-agent-navigator`）。
+在 `client/` 目录：
 
-运行类 skills（`run-project` 等）仍保留作细节参考；日常优先用上表三个 `/` 命令显式触发。
+```bash
+npm install
+npm test
+```
+
+启动前后端见上文 § 快速开始。可选云端 E2E：`RUN_CLOUD_LLM_E2E=1 uv run pytest tests/test_cloud_llm_sample_e2e.py -m integration -q`（需 `OPENROUTER_API_KEY`）。
 
 ---
 
@@ -379,13 +392,11 @@ npm run dev
 
 | 类型 | 位置 |
 |------|------|
+| 许可与二次开发 | 本 README § 项目声明与许可、[`LICENSE`](LICENSE) |
 | 环境与快速开始 | 本 README |
 | 技术参考（英文） | [`docs/`](docs/) — 索引 [`docs/README.md`](docs/README.md) |
-| Cursor 实施计划 / backlog | [`.cursor/plans/INDEX.md`](.cursor/plans/INDEX.md) |
-| Cursor slash commands / subagent | 上节 **Cursor IDE（本仓库）** |
-| Cursor AI 可见范围 | [`.cursorignore`](.cursorignore)（硬屏蔽）；[`.cursorindexingignore`](.cursorindexingignore)（仅索引）；全局见 **Cursor Settings → indexing** |
+| 开发与测试 | 本 README § 开发与测试 |
+| Cursor AI 可见范围（若用 Cursor 打开本仓库） | [`.cursorignore`](.cursorignore)、[`.cursorindexingignore`](.cursorindexingignore) |
 | 本地私人笔记（不提交） | `docs/local/`（见 [`.gitignore`](.gitignore)） |
 
-`docs/` 下 canonical 文档随仓库分发；`scripts/` 与 `docs/local/` 默认 gitignore。
-
-**活跃计划示例**： [Cloud LLM ROI fixes](.cursor/plans/cloud_llm_roi_fixes_c3a77a21.plan.md)、[Product roadmap](.cursor/plans/spreadsheet-cursor-roadmap_66f6c3b6.plan.md)、[LangGraph + Pydantic AI（远期）](.cursor/plans/langgraph-pydantic-ai-migration.plan.md)。
+`docs/` 下 canonical 文档随仓库分发；`scripts/`、`docs/local/`、`.cursor/` 默认不提交（见 [`.gitignore`](.gitignore)）。`.cursor/` 为维护者本机 Cursor 工作区（rules / plans / skills），公开仓库与 clone 结果中不包含。

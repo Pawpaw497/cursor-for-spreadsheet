@@ -1,7 +1,7 @@
 # Product brief & requirements
 
 > **How to use this doc**  
-> Personal project milestone sheet: capture what you want next, constraints, and how to verify it. The coding agent uses this (with code and `.cursor/plans/`) to refine tasks—**not** `docs/goals.md`, which is unused.  
+> Personal project milestone sheet: capture what you want next, constraints, and how to verify it. Use this with code and [`docs/`](./) for published planning—**not** `docs/goals.md`, which is unused. Maintainer-only Cursor plans live under local `.cursor/` (gitignored).  
 > 中文说明：个人持续开发项目的**阶段需求单**；每轮迭代更新优先级与 *Document changelog* 即可。
 
 ---
