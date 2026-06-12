@@ -22,6 +22,10 @@ jobs:
 
       - name: Sync and test backend
         working-directory: server
+        env:
+          # PA/agent unit tests mock LLM calls but still resolve cloud model config.
+          OPENROUTER_API_KEY: ci-dummy-key
+          UV_PYTHON: "3.11"
         run: |
           uv sync
           uv run pytest -q
