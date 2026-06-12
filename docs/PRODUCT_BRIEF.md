@@ -1,123 +1,100 @@
 # Product brief & requirements
 
-> **How to use this doc**  
-> Personal project milestone sheet: capture what you want next, constraints, and how to verify it. Use this with code and [`docs/`](./) for published planning—**not** `docs/goals.md`, which is unused. Maintainer-only Cursor plans live under local `.cursor/` (gitignored).  
-> 中文说明：个人持续开发项目的**阶段需求单**；每轮迭代更新优先级与 *Document changelog* 即可。
+> Personal milestone sheet for **open-source readability** (2026-06). Maintainer Cursor plans live under local `.cursor/` (gitignored). **Do not use** `docs/goals.md`.
 
 ---
 
 ## 1. Document meta
 
-
-| Field             | Value                                          |
-| ----------------- | ---------------------------------------------- |
-| **Title**         | *(short name for this initiative / milestone)* |
-| **Owner**         | *(you)*                                       |
-| **Status**        | *Draft / Active / Parked*                      |
-| **Last updated**  | *YYYY-MM-DD*                                   |
-| **Related links** | *e.g. PRs, issues, Figma, internal wiki*       |
-
+| Field | Value |
+| ----- | ----- |
+| **Title** | Open-source readiness — first-time visitor experience |
+| **Owner** | Pawpaw |
+| **Status** | Active |
+| **Last updated** | 2026-06-12 |
+| **Related links** | PR #19 (open-source readiness), `main` |
 
 ---
 
 ## 2. Problem statement
 
-*What user pain or product gap are we addressing? 1–3 sentences.*
-
-- **Context**:
-- **Pain**:
-- **Why now**:
+- **Context**: The MVP is functionally rich (Plan / Agent / preview), but the root README was dense; no LICENSE/CI/demo asset; LLM setup looked like it required a cloud API key.
+- **Pain**: External readers bounce before trying Cmd+K; forkers lack attribution/CI guardrails.
+- **Why now**: Repo moved to public GitHub; goal is **star / try / fork** for learning, not commercial positioning.
 
 ---
 
 ## 3. Target users & scenarios
 
-*Who uses this and in what flow? Be specific enough to test against.*
-
-
 | Persona / role | Primary scenario | Out of scope for *this* iteration |
 | -------------- | ---------------- | --------------------------------- |
-|                |                  |                                   |
-|                |                  |                                   |
-
+| Casual visitor | Skim README, run Ollama path in ~15 min, one Plan → Apply | Production hardening, SaaS |
+| Contributor | Fork with CC BY-NC notice, green CI on PR | Splitting all of `App.tsx` (deferred) |
 
 ---
 
 ## 4. Success criteria (measurable)
 
-*How we know we are done. Prefer testable statements.*
+- Criterion 1: New reader sees TL;DR + workflow diagram without scrolling past one screen.
+- Criterion 2: Quick Start **Ollama-first** with real `git clone` URL; full detail in `docs/getting-started.md`.
+- Criterion 3: `push`/`PR` to `main` runs `uv run pytest -q` + `npm test` in GitHub Actions.
+- Criterion 4: `LICENSE`, README declaration, and `CONTRIBUTING.md` agree on attribution + non-commercial use.
 
-- Criterion 1: *(metric or demo script)*
-- Criterion 2:
-- Criterion 3:
+**Non-goals (explicit)**
 
-**Non-goals (explicit)**: *what we will not build in this pass*
-
-- 
+- Commercial licensing, collaborative editing, full formula engine, `App.tsx` monolith split (follow-up PR).
 
 ---
 
 ## 5. Product requirements (backlog)
 
-*Order by **Priority** (P0 = must, P1 = should, P2 = could). One row per feature slice.*
+| ID | Priority | User story | Acceptance criteria | Notes |
+| --- | -------- | ---------- | ------------------- | ----- |
+| R1 | P0 | As a visitor I want a short README so I know what this is in 10s | TL;DR + `demo-flow.svg` linked from README | Done 2026-06-12 |
+| R2 | P0 | As a clone I want CI so I trust PRs | `.github/workflows/ci.yml` green on main | Done 2026-06-12 |
+| R3 | P1 | As a non-Chinese reader I want an English entry point | `README.en.md` + `docs/README.md` audience note | Done 2026-06-12 |
+| R4 | P2 | As a maintainer I want smaller UI files | Split `App.tsx` by panel (DiffPreviewBar, CmdKPanel, …) | **Pending** — defer follow-up PR |
 
+**Open questions**
 
-| ID  | Priority | User story (As a … I want … so that …) | Acceptance criteria (Given / When / Then) | Notes / dependencies |
-| --- | -------- | -------------------------------------- | ----------------------------------------- | -------------------- |
-| R1  | P0       |                                        |                                           |                      |
-| R2  | P1       |                                        |                                           |                      |
-
-
-**Open questions** *(blocking vs nice-to-have)*
-
-
-| #   | Question | Owner | Resolution / date |
+| # | Question | Owner | Resolution / date |
 | --- | -------- | ----- | ----------------- |
-| Q1  |          |       |                   |
-
+| Q1 | Record `demo.gif` for README? | Maintainer | Optional; SVG workflow shipped; GIF still welcome in `docs/assets/` |
 
 ---
 
 ## 6. Technical constraints (optional)
 
-*Only if they matter for this initiative.*
-
-- **Platforms / env**:
-- **Performance / scale**:
-- **Security / privacy**:
-- **Compat** *(browsers, Excel limits, model providers)*:
+- **Platforms / env**: Python 3.10+ (CI 3.11), Node 18+, `server/.venv` via uv only.
+- **Security / privacy**: CC BY-NC; demo `new Function`; audit SQLite local-only.
+- **Compat**: OpenRouter + Ollama; no cloud E2E in CI.
 
 ---
 
 ## 7. Rollout & verification
 
-- **How to demo** *(steps to verify in UI or API)*:
-- **Risks**:
-- **Follow-ups** *(next milestone ideas — do not scope creep this doc without a new section)*:
+- **How to demo**: Ollama path → load sample → Cmd+K → Generate Plan → Apply → Undo.
+- **Risks**: README drift vs code; mitigated by linking deep docs.
+- **Follow-ups**: `split-app-tsx`, optional `demo.gif`.
 
 ---
 
 ## 8. Document changelog
 
-
 | Date | Author | Summary |
 | ---- | ------ | ------- |
-|      |        |         |
-
+| 2026-06-08 | Pawpaw | Seeded open-source readiness milestone (README trim, CI, demo asset, CONTRIBUTING). |
+| 2026-06-12 | Agent | Filled P0/P1 rows; marked Phase 1–2 items complete; R4 split deferred. |
 
 ---
 
-## Appendix A — Project baseline (reference only, do not duplicate README)
+## Appendix A — Project baseline (reference only)
 
-*The agent can refresh this table when architecture shifts; you usually do not edit it by hand.*
+| Layer | Main pieces |
+| ----- | ----------- |
+| **Frontend** | React + Vite + AG Grid; `client/src/App.tsx`, `engine.ts`, `llm.ts` |
+| **Backend** | FastAPI; `server/app/api/routes/` |
+| **Agent** | `server/app/agent/`, `app/services/llm.py`, `tools.py` |
+| **Contract** | JSON `Plan` shared by prompts, executor, client engine |
 
-
-| Layer        | Main pieces                                                                                                            |
-| ------------ | ---------------------------------------------------------------------------------------------------------------------- |
-| **Frontend** | React + Vite + AG Grid; `client/src/App.tsx`, `client/src/engine.ts`, `client/src/llm.ts`                              |
-| **Backend**  | FastAPI; routes under `server/app/api/routes/` (`plan`, `agent`, `chat`, `config`, `export`, `load`, `health`)         |
-| **Agent**    | `server/app/agent/` (state, decision loop, sub-agents, tools in `app/services/tools.py`, LLM in `app/services/llm.py`) |
-| **Contract** | JSON `Plan` / project plans shared by prompts, executor, and client engine                                             |
-
-
-*Update README for user-facing "how to run"; use this file for **your** next milestone requirements.*
+*User-facing run instructions: root README + `docs/getting-started.md`.*
