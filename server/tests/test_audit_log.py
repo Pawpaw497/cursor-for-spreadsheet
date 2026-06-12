@@ -25,6 +25,18 @@ async def _flush_audit_tasks() -> None:
     await asyncio.sleep(0.05)
 
 
+def _schedule_audit_sync(**kwargs: object) -> None:
+    """Test helper: complete HTTP audit write before middleware returns (avoids CI races)."""
+
+    def _run() -> None:
+        asyncio.run(audit_mod.record_http_request(**kwargs))
+
+    thread = __import__("threading").Thread(target=_run)
+    thread.start()
+    thread.join(timeout=5.0)
+    assert not thread.is_alive(), "audit HTTP write timed out"
+
+
 async def _http_rows(trace_id: str) -> list[audit_db.HttpRequestLog]:
     factory = audit_db.get_session_factory()
     assert factory is not None
@@ -149,6 +161,7 @@ def test_middleware_records_plan_request(
         return json.dumps(plan_json)
 
     monkeypatch.setattr("app.api.routes.plan.call_llm", fake_call_llm)
+    monkeypatch.setattr("app.main.schedule_record_http_request", _schedule_audit_sync)
 
     body = {
         "prompt": "add column",
@@ -165,8 +178,7 @@ def test_middleware_records_plan_request(
         assert resp.status_code == 200
 
     async def check() -> None:
-        await _flush_audit_tasks()
-        await audit_db.reset_audit_db_for_tests()
+        # App lifespan may close the engine after TestClient exits; reconnect to the same DB file.
         await audit_db.init_audit_db()
         rows = await _http_rows("trace-mw-plan")
         assert len(rows) >= 1
