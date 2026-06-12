@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Sync and test backend
+        working-directory: server
+        env:
+          # PA/agent unit tests mock LLM calls but still resolve cloud model config.
+          OPENROUTER_API_KEY: ci-dummy-key
+          UV_PYTHON: "3.11"
+        run: |
+          uv sync
+          uv run pytest -q
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+
+      - name: Install and test frontend
+        working-directory: client
+        run: |
+          npm ci
+          npm test

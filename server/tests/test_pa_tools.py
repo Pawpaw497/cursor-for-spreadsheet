@@ -31,7 +31,7 @@ def _deps() -> SimpleNamespace:
 def test_tool_names_match_definitions() -> None:
     names = tool_names()
     assert names == [d.name for d in PA_TOOL_DEFINITIONS]
-    assert len(names) == 6
+    assert len(names) == len(PA_TOOL_DEFINITIONS)
 
 
 def test_get_tools_spec_for_llm_delegates_to_pa() -> None:

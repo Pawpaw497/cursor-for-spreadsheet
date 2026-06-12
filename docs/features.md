@@ -1,6 +1,6 @@
 # 功能亮点（当前能力）
 
-> **维护约定**：每次功能修改后，在本文档与 `AGENT_IMPROVEMENTS.md` 中同步更新（不要求在聊天中展开细节）。
+> **维护约定**：每次功能修改后，在本文档与 [`agent-improvements.md`](./agent-improvements.md) 中同步更新（不要求在聊天中展开细节）。
 
 ---
 
@@ -60,6 +60,38 @@
 - 后端对 Excel/CSV 解析增加耗时与行列统计日志，并在解析函数中预留「最大行数」参数，便于未来支持仅加载前 N 行预览的大文件场景。
 
 ---
+
+## AI 对话与历史
+
+- 右侧 AI 面板：**AI 对话**（气泡）、**Schema**、**历史对话**（payload / plan / diff 技术视图）。
+- **AI 对话气泡**：仅保留**本次后端进程**期间；`serverBootId` 来自 `/health`、`/api/config`；键 `spreadsheet-cursor:chat:<serverBootId>:<workspaceKey>`（`sessionStorage`）。重启 uvicorn 后清空。
+- **技术历史**：`conversations` 按工作区键写入 `localStorage`；内置示例键 `workspace:builtin:sample-xlsx`；上传文件按内容 SHA-256。详见 [`client-storage.md`](./client-storage.md)。
+- **模型选择**：`spreadsheet-cursor:model-pref`（`localStorage`）。
+
+## Agent 澄清（clarification）
+
+- **触发**：多表且 Plan 含 `add_column` / `transform_column` 但未带 `table`；或列名跨表重复且步骤未指定 `table`（`server/app/agent/clarification.py`）。
+- **响应**：`kind: "clarification"`，含 `question` / `options` / `context`；无 `plan`。
+- **续跑**：`clarificationReply` + `clarificationTurnId`；前端 `submitClarificationAnswer` 优先发送结构化回复。
+- **SSE**：`VITE_AGENT_USE_STREAM=true` 时多表 Generate 可走 `/api/agent-stream`。
+- 详见 [`agent-improvements.md`](./agent-improvements.md)；测试见 `server/tests/test_agent_clarification_*.py`、`test_clarification.py`。
+
+## Agent 预览生命周期（`previewLifecycle`）
+
+- 多表 Generate 可走服务端 dry-run，返回 `kind: "preview_ready"`；`previewDecision`: `confirm` | `abort` | `revise`。
+- `previewTables` 每表最多 5000 行（前后端常量须一致）。
+- 详见 [`agent-preview-lifecycle.md`](./agent-preview-lifecycle.md)；测试 `server/tests/test_agent_preview.py`、`client/src/llm.preview.test.ts`。
+
+## Agent 记忆与上下文（Stage 4–6）
+
+- 可选 `context`（选区、rules）；rules 存 `localStorage` — [`agent-memory.md`](./agent-memory.md)。
+- 长对话 middle-out 压缩（服务端 + 客户端）。
+- 可选 `SESSION_MEMORY_DB_ENABLED=1`：SQLite 会话备份。
+
+## 安全与正确性（Demo）
+
+- `add_column` 经 `new Function` 在浏览器执行，**不适合生产**。
+- Agent 空回复 / Plan 校验失败映射为稳定 HTTP 错误（`422` / `502`）；见 `server/tests/test_agent_message_shape.py`。
 
 ## 非目标（当前范围）
 
