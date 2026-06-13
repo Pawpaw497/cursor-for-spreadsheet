@@ -209,5 +209,8 @@ def test_stream_agent_events_preview_ready_wire_aliases() -> None:
         assert preview_ev is not None
         _assert_wire_plan_keys(preview_ev["plan"])
         _assert_wire_plan_keys(preview_ev["preview"]["plan"])
+        assert "previewHistory" in preview_ev
+        assert len(preview_ev["previewHistory"]) == 1
+        assert preview_ev["previewHistory"][0]["id"] == preview_ev["preview"]["id"]
 
     __import__("asyncio").run(run())

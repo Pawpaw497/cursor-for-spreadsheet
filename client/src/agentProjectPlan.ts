@@ -31,11 +31,12 @@ export function mapAgentStreamEventsToResult(
   const previewEv = [...events].reverse().find((e) => e.kind === "preview_ready");
   if (previewEv) {
     const d = previewEv.data;
+    const histRaw = (d.previewHistory as Record<string, unknown>[] | undefined) ?? [];
     return {
       kind: "preview_ready",
       plan: parsePlanFromWire(d.plan as Record<string, unknown>),
       preview: parseAgentPreviewRecord(d.preview as Record<string, unknown>),
-      previewHistory: [],
+      previewHistory: histRaw.map((r) => parseAgentPreviewRecord(r)),
       state: (d.state as Record<string, unknown>) ?? {}
     };
   }

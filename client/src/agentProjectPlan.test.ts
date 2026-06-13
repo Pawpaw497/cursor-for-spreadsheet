@@ -71,6 +71,59 @@ describe("mapAgentStreamEventsToResult", () => {
     expect(result.kind).toBe("preview_ready");
   });
 
+  it("preserves previewHistory from preview_ready SSE payload", () => {
+    const plan = {
+      intent: "t",
+      steps: [{ action: "add_column", name: "c", expression: "1" }]
+    };
+    const priorPreview = {
+      id: "pv0",
+      plan,
+      diff: {
+        addedColumns: [],
+        modifiedColumns: [],
+        validationWarnings: [],
+        validationErrors: []
+      },
+      new_tables: [],
+      status: "revised",
+      created_at: 0
+    };
+    const currentPreview = {
+      id: "pv1",
+      plan,
+      diff: {
+        addedColumns: ["c"],
+        modifiedColumns: [],
+        validationWarnings: [],
+        validationErrors: []
+      },
+      new_tables: [],
+      status: "pending",
+      created_at: 1
+    };
+    const result = mapAgentStreamEventsToResult([
+      {
+        kind: "preview_ready",
+        data: {
+          plan,
+          preview: currentPreview,
+          previewHistory: [priorPreview, currentPreview],
+          state: { revision_count: 1 }
+        }
+      },
+      { kind: "plan_done", data: { plan, state: {} } }
+    ]);
+    expect(result.kind).toBe("preview_ready");
+    if (result.kind === "preview_ready") {
+      expect(result.previewHistory).toHaveLength(2);
+      expect(result.previewHistory[0].id).toBe("pv0");
+      expect(result.previewHistory[0].status).toBe("revised");
+      expect(result.previewHistory[1].id).toBe("pv1");
+      expect(result.preview.id).toBe("pv1");
+    }
+  });
+
   it("maps plan_done to plan result", () => {
     const plan = {
       intent: "t",

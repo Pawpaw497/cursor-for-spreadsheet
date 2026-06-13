@@ -261,34 +261,95 @@ async def stream_agent_events(
     preview_lifecycle: bool = False,
     execution_tables: Optional[Dict[str, TableData]] = None,
 ) -> AsyncIterator[str]:
-    """SSE：事件名与 data 形态与原 `routes/agent` 中实现保持一致。
+    """SSE via LangGraph ``astream_events``; event names and payloads match the legacy contract.
 
-    在循环前执行与 `build_agent_graph` 一致的 context/intent 节点（MVP 透传），
-    以便与 `run_agent_orchestrated` 的图入口对齐。
+    Graph nodes ``context_analyzer`` / ``intent_analyzer`` run on each invocation, aligned
+    with ``run_agent_orchestrated``. An outer loop handles preview revision the same way as sync.
 
     @param state: 初始 Agent 状态。
     @param preview_lifecycle: 为真且提供 ``execution_tables`` 时，在 ``plan_done`` 之外额外发送 ``preview_ready``。
     @param execution_tables: 与 ``run_agent_orchestrated`` 相同的 dry-run 表快照。
     """
-    s = analyze_context(state)
-    s = analyze_intent(s)
+    graph = get_compiled_agent_graph()
+    working = state
+
     while True:
-        if s.current_turn >= s.max_turns:
-            yield _sse("finish", {"reason": "max_turns", "state": s.to_dict()})
+        if working.current_turn >= working.max_turns:
+            yield _sse("finish", {"reason": "max_turns", "state": working.to_dict()})
             return
 
-        s, action = await agent_react_step(s, use_tools=True)
-        kind = action_kind(action)
+        init: AgentGraphState = {
+            "agent": working.model_dump(),
+            "scratch": {},
+        }
+        terminal_action: AgentAction | None = None
+        agent_out = working
+        last_tool_name: str | None = None
+
+        async for event in graph.astream_events(init, version="v2"):
+            if event.get("event") != "on_chain_end":
+                continue
+            ev_name = event.get("name")
+            if ev_name not in ("llm_decide", "tool_exec"):
+                continue
+
+            output = (event.get("data") or {}).get("output") or {}
+            if not isinstance(output, dict) or "agent" not in output:
+                continue
+
+            agent_out = AgentState.model_validate(output["agent"])
+            scratch = output.get("scratch") or {}
+
+            if ev_name == "llm_decide":
+                route = scratch.get("route")
+                if route == "tool":
+                    pending = scratch.get("pending_ct") or {}
+                    last_tool_name = str(pending.get("tool_name", ""))
+                    yield _sse(
+                        "tool_call",
+                        {
+                            "tool": last_tool_name,
+                            "args": pending.get("tool_args"),
+                            "state": agent_out.to_dict(),
+                        },
+                    )
+                elif route == "end":
+                    ser = scratch.get("ser_action")
+                    if ser:
+                        terminal_action = _deserialize_terminal_action(ser)
+            elif ev_name == "tool_exec" and last_tool_name is not None:
+                yield _sse(
+                    "tool_result",
+                    {"tool": last_tool_name, "state": agent_out.to_dict()},
+                )
+                last_tool_name = None
+                await asyncio.sleep(0)
+
+        if terminal_action is None:
+            log.error(
+                "stream_agent_events: missing terminal action after graph stream"
+            )
+            yield _sse(
+                "finish",
+                {
+                    "reason": "internal_orchestrator_state",
+                    "state": agent_out.to_dict(),
+                },
+            )
+            return
+
+        kind = action_kind(terminal_action)
 
         if kind == "output_plan":
-            plan_obj = action.payload
+            opa = cast(OutputPlanAction, terminal_action)
+            plan_obj = opa.payload
             plan_dump = plan_to_wire_dict(plan_obj)
             if preview_lifecycle and execution_tables is not None:
                 preview_eval = evaluate_output_plan_preview(
-                    s, plan_obj, execution_tables
+                    agent_out, plan_obj, execution_tables
                 )
                 if isinstance(preview_eval, PreviewEvaluationRevise):
-                    s = preview_eval.working_agent
+                    working = preview_eval.working_agent
                     continue
                 if isinstance(preview_eval, PreviewEvaluationCap):
                     yield _sse(
@@ -300,28 +361,33 @@ async def stream_agent_events(
                     )
                     return
                 ready = cast(PreviewEvaluationReady, preview_eval)
-                s = ready.agent
+                agent_out = ready.agent
                 yield _sse(
                     "preview_ready",
                     {
                         "plan": plan_dump,
                         "preview": preview_record_to_wire_dict(ready.record),
-                        "state": s.to_dict(),
+                        "previewHistory": [
+                            preview_record_to_wire_dict(h)
+                            for h in agent_out.preview_history
+                        ],
+                        "state": agent_out.to_dict(),
                     },
                 )
             yield _sse(
                 "plan_done",
-                {"plan": plan_dump, "state": s.to_dict()},
+                {"plan": plan_dump, "state": agent_out.to_dict()},
             )
             return
 
         if kind == "finish":
-            reason = (action.payload and action.payload.reason) or "unknown"
-            yield _sse("finish", {"reason": reason, "state": s.to_dict()})
+            fa = cast(FinishAction, terminal_action)
+            reason = (fa.payload and fa.payload.reason) or "unknown"
+            yield _sse("finish", {"reason": reason, "state": agent_out.to_dict()})
             return
 
         if kind == "ask_clarification":
-            ap = cast(AskClarificationAction, action)
+            ap = cast(AskClarificationAction, terminal_action)
             p = ap.payload
             yield _sse(
                 "clarification",
@@ -329,22 +395,17 @@ async def stream_agent_events(
                     "question": p.question,
                     "options": p.options,
                     "context": p.context,
-                    "state": s.to_dict(),
+                    "state": agent_out.to_dict(),
                 },
             )
             return
 
-        if kind == "call_tool":
-            cta = cast(CallToolAction, action)
-            yield _sse(
-                "tool_call",
-                {
-                    "tool": cta.payload.tool_name,
-                    "args": cta.payload.tool_args,
-                    "state": s.to_dict(),
-                },
-            )
-            s = run_tool_and_append_messages(s, cta)
-            yield _sse("tool_result", {"tool": cta.payload.tool_name, "state": s.to_dict()})
-
-        await asyncio.sleep(0)
+        log.error("stream_agent_events: unexpected terminal action %s", kind)
+        yield _sse(
+            "finish",
+            {
+                "reason": "internal_orchestrator_state",
+                "state": agent_out.to_dict(),
+            },
+        )
+        return

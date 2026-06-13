@@ -472,7 +472,7 @@ async function fetchWithTimeout(
 export function parseApiErrorMessage(status: number, txt: string): string {
   try {
     const j = JSON.parse(txt) as {
-      detail?: string | { reason?: string };
+      detail?: string | { reason?: string; staleReason?: string };
     };
     if (j && typeof j.detail === "string") return j.detail;
     if (
@@ -481,6 +481,14 @@ export function parseApiErrorMessage(status: number, txt: string): string {
       typeof j.detail === "object" &&
       typeof j.detail.reason === "string"
     ) {
+      if (j.detail.reason === "stale_preview") {
+        if (j.detail.staleReason === "content") {
+          return `[${status}] Preview is stale: table data changed after preview. Regenerate preview.`;
+        }
+        if (j.detail.staleReason === "structure") {
+          return `[${status}] Preview is stale: table structure changed after preview. Regenerate preview.`;
+        }
+      }
       return `[${status}] ${j.detail.reason}`;
     }
   } catch {

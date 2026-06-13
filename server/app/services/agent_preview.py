@@ -10,7 +10,7 @@ import json
 import time
 import uuid
 from dataclasses import dataclass
-from typing import Any, Dict, List, Mapping, Optional, Union
+from typing import Any, Dict, List, Literal, Mapping, Optional, Union
 
 from app.logging_config import get_logger
 from app.models.agent_models import AgentState, PreviewRecord
@@ -40,14 +40,8 @@ def new_preview_id() -> str:
     return f"preview_{uuid.uuid4().hex[:16]}"
 
 
-def fingerprint_execution_tables(tables: Mapping[str, TableData]) -> str:
-    """对当前已提交表形状做轻量指纹，用于 confirm 时检测预览是否过期。
-
-    仅纳入表名、行数与各列 key，避免对大表全量内容做哈希。
-
-    @param tables: 表名到执行引擎 ``TableData`` 的映射。
-    @return: SHA256 十六进制摘要字符串。
-    """
+def _structure_payload_for_tables(tables: Mapping[str, TableData]) -> Dict[str, Any]:
+    """构造仅含表名、行数与 schema 列 key 的指纹载荷。"""
     payload: Dict[str, Any] = {}
     for name in sorted(tables.keys()):
         t = tables[name]
@@ -55,8 +49,76 @@ def fingerprint_execution_tables(tables: Mapping[str, TableData]) -> str:
             "rowCount": len(t.rows),
             "schemaKeys": [c.key for c in t.schema],
         }
+    return payload
+
+
+def _content_payload_for_table(t: TableData) -> List[Dict[str, Any]]:
+    """对单表行做有界采样并规范化键序，供内容指纹稳定序列化。"""
+    rows = t.rows[:PREVIEW_TABLES_MAX_ROWS_PER_TABLE]
+    return [{k: row[k] for k in sorted(row.keys())} for row in rows]
+
+
+def _content_payload_for_tables(tables: Mapping[str, TableData]) -> Dict[str, Any]:
+    """构造各表有界行内容的指纹载荷。"""
+    payload: Dict[str, Any] = {}
+    for name in sorted(tables.keys()):
+        payload[name] = _content_payload_for_table(tables[name])
+    return payload
+
+
+def _sha256_json_payload(payload: Mapping[str, Any]) -> str:
     raw = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(raw).hexdigest()
+
+
+def fingerprint_execution_tables_structure_only(tables: Mapping[str, TableData]) -> str:
+    """仅对表结构（行数 + schema 列 key）做指纹。
+
+    @param tables: 表名到执行引擎 ``TableData`` 的映射。
+    @return: SHA256 十六进制摘要字符串。
+    """
+    return _sha256_json_payload(_structure_payload_for_tables(tables))
+
+
+def fingerprint_execution_tables_content_only(tables: Mapping[str, TableData]) -> str:
+    """对有界采样的单元格内容做指纹（每表最多 ``PREVIEW_TABLES_MAX_ROWS_PER_TABLE`` 行）。
+
+    @param tables: 表名到执行引擎 ``TableData`` 的映射。
+    @return: SHA256 十六进制摘要字符串。
+    """
+    return _sha256_json_payload(_content_payload_for_tables(tables))
+
+
+def fingerprint_execution_tables(tables: Mapping[str, TableData]) -> str:
+    """对当前已提交表做结构 + 有界内容指纹，用于 confirm 时检测预览是否过期。
+
+    返回 ``{structure_hash}:{content_hash}``，便于在 confirm 路径区分结构陈旧与内容陈旧。
+
+    @param tables: 表名到执行引擎 ``TableData`` 的映射。
+    @return: 复合指纹字符串。
+    """
+    struct_fp = fingerprint_execution_tables_structure_only(tables)
+    content_fp = fingerprint_execution_tables_content_only(tables)
+    return f"{struct_fp}:{content_fp}"
+
+
+def classify_stale_preview_reason(
+    expected_fingerprint: str,
+    current_tables: Mapping[str, TableData],
+) -> Literal["structure", "content"]:
+    """根据预期指纹与当前表推断陈旧类型（结构变化 vs 仅内容变化）。
+
+    @param expected_fingerprint: 预览创建时写入的复合指纹。
+    @param current_tables: confirm 时解析的已提交表。
+    @return: ``"structure"`` 或 ``"content"``。
+    """
+    if ":" not in expected_fingerprint:
+        return "structure"
+    struct_expected = expected_fingerprint.split(":", 1)[0]
+    struct_now = fingerprint_execution_tables_structure_only(current_tables)
+    if struct_now != struct_expected:
+        return "structure"
+    return "content"
 
 
 def execution_tables_from_execute_tables(rows_payload: List[ExecuteTable]) -> Dict[str, TableData]:
