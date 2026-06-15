@@ -1,13 +1,13 @@
 # 功能亮点（当前能力）
 
-> **维护约定**：每次功能修改后，在本文档与 [`agent-improvements.md`](./agent-improvements.md) 中同步更新（不要求在聊天中展开细节）。
+> **维护约定**：行为变更时同步更新本文档、根目录 `README.md` 与对应 `docs/*.md` 技术页。Agent 记忆契约见 [`agent-memory.md`](agent-memory.md)。
 
 ---
 
 ## 产品形态
 
 - **Cmd+K 式表格编辑**：自然语言 + 当前表上下文 → 结构化执行计划 → Diff 预览 → 一键 Apply。
-- 支持**单表**与**多表/项目**（join、create_table）。
+- 支持**单表**与**多表/项目**（join、create_table、lookup 等）。
 
 ---
 
@@ -15,78 +15,49 @@
 
 ### 交互与计划
 
-- **单表计划**（`/api/plan`）：前后端共享统一的 PlanStep 语义，支持：
-  - 列级操作：`add_column`、`transform_column`（trim/lower/upper/replace/parse_date）、`rename_column`、`delete_column`、`reorder_columns`、`cast_column_type` 等；
-  - 行级操作：`filter_rows`、`delete_rows`、`deduplicate_rows`、`sort_table`、`fill_missing`（constant/mean/median/mode）等；
-  - add_column 的 expression 支持 LLM 返回完整箭头形式（`row => body`），前后端执行前统一 strip 为 body，Apply 后新列可正确填充。
-- **多表计划**（`/api/plan-project`）：在单表能力基础上，支持 `join_tables`、`create_table`、`aggregate_table`、`union_tables`、`lookup_column` 等多表操作，统一由前端与后端的执行引擎理解与落地。
-- **Agent 模式**（`/api/agent`）：多轮推理 + 工具调用，同一请求体（多表格式），返回 plan 或 error/clarification。
-- **Diff 预览 + 执行路径 + 撤销**：
-  - Diff 高亮分为两层：
-    - 表格内：新增列使用浅绿色列头和单元格背景（`cell-added` / `col-header-added`），修改列使用浅黄色背景（`cell-modified` / `col-header-modified`），用户可以直接在主工作表中看到本次操作影响范围。
-    - AI 面板中：以 JSON 形式展示 `Diff`（`addedColumns` / `modifiedColumns`），默认只显示前几行，支持「展开全部 Diff / 收起 Diff」按钮；若计划包含新建表，还会额外列出将要创建的表名。
-  - 执行路径：
-    - 单表场景可由前端先本地预览 Diff，再通过 `/api/execute-plan` 在后端一次性执行 Plan 并返回最新表状态；
-    - 多表 / 项目场景可通过 `/api/projects/{id}/execute-plan` 基于 ProjectState 执行 Plan，并写回后端的项目内表集合。
-  - 撤销：每次 Apply 前前端都会保存一次快照，工具栏的「撤销」按钮会将表格恢复到最近一次 Apply 前的状态（当前为前端内存级别，不做持久化版本管理）。
+- **单表计划**（`/api/plan`）：列级与行级步骤与 [`plan-step-types-reference.md`](plan-step-types-reference.md) 一致；`add_column` 表达式支持 `row => body` 形式，Apply 前后端统一 strip。
+- **多表计划**（`/api/plan-project`）：`join_tables`、`create_table`、`aggregate_table`、`union_tables`、`lookup_column` 等。
+- **Agent 模式**（`/api/agent`、`/api/agent-stream`）：Pydantic AI + LangGraph 多轮工具调用；可返回 `plan`、`clarification`、`preview_ready` 或错误。
+- **Diff 预览 + Apply + 撤销**：主表 dry-run 高亮；Apply 前快照，工具栏撤销恢复最近一次 Apply 前状态。
 
-### 对话视图与历史
+### 对话、记忆与存储
 
-- **Chat 气泡视图**：右侧 AI 面板的 Chat 标签页展示自然语言对话：
-  - 由 `/api/chat-history` 聚合最近一次或多次会话中的消息，并与当前会话生成的即时消息（live）一起展示；
-  - 区分 `user` / `assistant` / `system` 三种角色：用户消息右对齐深色气泡，模型回复左对齐浅灰色气泡，系统提示为黄色卡片；
-  - 通过 `source` 字段区分历史消息与现场消息，历史消息额外显示「历史」标签，并统一展示时间戳。
-- **技术历史视图（History 标签）**：
-  - 使用 `conversations` 列表记录每一次对 LLM 的调用，包括 prompt、请求 payload、Plan JSON、Diff、模型来源（云端/本地）与模型 ID 等；
-  - 支持按条目展开/收起「发送给 AI 的内容」和「AI 回复」，同时提供 Diff 的截断/展开按钮，方便在调试时快速复现具体请求与响应。
+- **AI 对话气泡**：持久化在 `workspaceMemory.chatTranscript`（`localStorage`，按 `workspaceKey`）。**跨页面刷新与后端重启均可恢复**；后端重启时显示恢复横幅（`lastServerBootId` 变化）。
+- **Agent 多轮记忆**：`agentTranscript`、`applyLog` → 滚动 `appliedPlansSummary`；每次 Agent 请求携带 `history` 与 `X-Session-ID`。
+- **技术历史（History 标签）**：`workspaceHistoryStorage` 记录 payload / plan / diff（最多 30 条/工作区）。
+- **工作区 rules**：`workspaceRulesStorage` 文本域，经 `context.workspaceRules` 注入 Agent。
+- **可选服务端会话备份（Stage 6）**：`SESSION_MEMORY_DB_ENABLED=1` 时多 tab 同步与 TTL 内从 SQLite 恢复；见 [`agent-memory.md`](agent-memory.md)。
+- **长对话压缩（Stage 5）**：客户端 `memoryCompaction.ts` 与服务端 `memory_compaction.py` middle-out 裁剪。
 
-### Agent 骨架与工具
+### Agent 澄清（clarification）
 
-- **AgentState**（`app/agent/state.py`）：显式状态（tables、messages、applied_plans_summary、conversation、current_turn、max_turns）。
-- **动作枚举**（`app/agent/actions.py`）：call_tool / output_plan / ask_clarification / finish，与 payload。
-- **pa_decision + run_agent_orchestrated**（`app/agent/pa_decision.py`, `orchestrator.py`）：Pydantic AI 单步决策与 LangGraph 循环，支持 tools 与多表澄清（`agent_helpers.maybe_need_clarification`）。
-- **工具集**（`app/services/tools.py`）：get_schema、get_sample_rows、get_column_stats、validate_expression；LLM 通过 tool calling 调用。
-- **LLM tool calling**（`app/services/llm.py`）：call_llm_with_tools（OpenRouter + Ollama），返回 content 或 tool_calls。
+两条路径，前端均展示为 `kind: "clarification"`：
 
-### 后端结构
+| 路径 | 触发 | 模块 |
+|------|------|------|
+| **LLM 主动** | PA 调用 `ask_user` 工具（意图不明时） | `pa_tools.py`, `pa_decision.py` |
+| **规则拦截** | Plan 产出后多表步骤缺 `table` 等 | `clarification.py` → `maybe_need_clarification` |
 
-- FastAPI：`/api/plan`、`/api/plan-project`、`/api/agent`、`/api/agent-stream`、`/api/export-excel`、`/api/config`、health。
-- 模型：OpenRouter（云端）、Ollama（本地），可配置模型列表。
+- 续跑：`clarificationReply` + `clarificationTurnId`；Q/A 写入 `agentTranscript`（`[Clarification]` 格式）。
+- 选区感知：当 `context.activeTable` / `focusedColumn` 已消歧时，规则路径可跳过澄清。
+- SSE：`clarification` 终端事件；可选 `VITE_AGENT_USE_STREAM=true` 走 `/api/agent-stream`。
+- 遥测：后端 `agent_clarification` / `clarification_resolved` 日志；前端 `logInfo` 同名事件。
 
-### 数据加载与导入体验
+### Agent 预览生命周期
 
-- 启动时示例加载 `/api/load-sample` 采用有限重试 + 缩短单次超时策略，在后端不可用时总等待时间控制在约 8–10 秒内，并给出明确错误提示。
-- 导入 Excel/CSV 文件 `/api/import-file` 在前端使用更长超时窗口（约 20 秒）和更清晰的状态文案，避免大文件导入时用户误以为前端卡死。
-- 后端对 Excel/CSV 解析增加耗时与行列统计日志，并在解析函数中预留「最大行数」参数，便于未来支持仅加载前 N 行预览的大文件场景。
+多表 Generate Plan 可设 `previewLifecycle: true`：服务端 dry-run → `preview_ready` → confirm / abort / revise。详见 [`agent-preview-lifecycle.md`](agent-preview-lifecycle.md)。
+
+### 后端与可观测性
+
+- FastAPI：`/api/plan*`、`/api/agent*`、`/api/sessions/{id}`（可选）、`/api/config`、`/health`。
+- SQLite 审计（默认开）：`http_request_logs` / `llm_call_logs`；与记忆表分离，不注入 prompt。
+- 工具集：`get_schema`、`get_sample_rows`、`get_column_stats`、`validate_expression` 等。
+
+### 数据加载
+
+- `/api/load-sample` 有限重试 + 短超时；`/api/import-file` 前端约 20s 超时与明确状态文案。
 
 ---
-
-## AI 对话与历史
-
-- 右侧 AI 面板：**AI 对话**（气泡）、**Schema**、**历史对话**（payload / plan / diff 技术视图）。
-- **AI 对话气泡**：仅保留**本次后端进程**期间；`serverBootId` 来自 `/health`、`/api/config`；键 `spreadsheet-cursor:chat:<serverBootId>:<workspaceKey>`（`sessionStorage`）。重启 uvicorn 后清空。
-- **技术历史**：`conversations` 按工作区键写入 `localStorage`；内置示例键 `workspace:builtin:sample-xlsx`；上传文件按内容 SHA-256。详见 [`client-storage.md`](./client-storage.md)。
-- **模型选择**：`spreadsheet-cursor:model-pref`（`localStorage`）。
-
-## Agent 澄清（clarification）
-
-- **触发**：多表且 Plan 含 `add_column` / `transform_column` 但未带 `table`；或列名跨表重复且步骤未指定 `table`（`server/app/agent/clarification.py`）。
-- **响应**：`kind: "clarification"`，含 `question` / `options` / `context`；无 `plan`。
-- **续跑**：`clarificationReply` + `clarificationTurnId`；前端 `submitClarificationAnswer` 优先发送结构化回复。
-- **SSE**：`VITE_AGENT_USE_STREAM=true` 时多表 Generate 可走 `/api/agent-stream`。
-- 详见 [`agent-improvements.md`](./agent-improvements.md)；测试见 `server/tests/test_agent_clarification_*.py`、`test_clarification.py`。
-
-## Agent 预览生命周期（`previewLifecycle`）
-
-- 多表 Generate 可走服务端 dry-run，返回 `kind: "preview_ready"`；`previewDecision`: `confirm` | `abort` | `revise`。
-- `previewTables` 每表最多 5000 行（前后端常量须一致）。
-- 详见 [`agent-preview-lifecycle.md`](./agent-preview-lifecycle.md)；测试 `server/tests/test_agent_preview.py`、`client/src/llm.preview.test.ts`。
-
-## Agent 记忆与上下文（Stage 4–6）
-
-- 可选 `context`（选区、rules）；rules 存 `localStorage` — [`agent-memory.md`](./agent-memory.md)。
-- 长对话 middle-out 压缩（服务端 + 客户端）。
-- 可选 `SESSION_MEMORY_DB_ENABLED=1`：SQLite 会话备份。
 
 ## 安全与正确性（Demo）
 
@@ -96,4 +67,3 @@
 ## 非目标（当前范围）
 
 - 协同编辑、完整公式引擎、多表血缘图、外部数据源连接。
-
