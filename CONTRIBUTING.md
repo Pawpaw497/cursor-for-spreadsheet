@@ -4,7 +4,7 @@ Thank you for interest in this personal learning project. This repo is **CC BY-N
 
 ## Before you fork
 
-1. Read [LICENSE](LICENSE) and the root [README](README.md) § **项目声明与许可**.
+1. Read [LICENSE](LICENSE) and the root [README](README.md) § **Project declaration & license** ([中文](README.cn.md#项目声明与许可)).
 2. **Non-commercial only** — no production SaaS, paid services, or internal for-profit use without written permission from the copyright holder.
 3. **Attribution required** — keep a visible notice, for example:
 

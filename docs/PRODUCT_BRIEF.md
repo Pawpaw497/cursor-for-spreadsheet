@@ -52,7 +52,7 @@
 | --- | -------- | ---------- | ------------------- | ----- |
 | R1 | P0 | As a visitor I want a short README so I know what this is in 10s | TL;DR + `demo-flow.svg` linked from README | Done 2026-06-12 |
 | R2 | P0 | As a clone I want CI so I trust PRs | `.github/workflows/ci.yml` green on main | Done 2026-06-12 |
-| R3 | P1 | As a non-Chinese reader I want an English entry point | `README.en.md` + `docs/README.md` audience note | Done 2026-06-12 |
+| R3 | P1 | As a non-Chinese reader I want an English entry point | English root `README.md` + `README.cn.md` + `docs/README.md` audience note | Done 2026-06-12 |
 | R4 | P2 | As a maintainer I want smaller UI files | Split `App.tsx` by panel (DiffPreviewBar, CmdKPanel, …) | **Pending** — defer follow-up PR |
 
 **Open questions**

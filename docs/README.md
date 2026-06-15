@@ -6,8 +6,8 @@ Canonical reference for **spreadsheet-cursor-mvp**, a personal side project unde
 
 | Surface | Language | Audience |
 | ------- | -------- | -------- |
-| [Root README](../README.md) | 中文为主 | First-time users, quick start, license |
-| [README.en.md](../README.en.md) | English | Short TL;DR + links to Chinese setup |
+| [Root README](../README.md) | English | First-time users, quick start, license |
+| [README.cn.md](../README.cn.md) | 中文 | Chinese mirror of root README |
 | **`docs/`** (this tree) | English | APIs, contracts, architecture, Agent internals |
 | [getting-started.md](./getting-started.md) | English | Detailed setup (Ollama + OpenRouter) |
 | [features.md](./features.md) | 中文 | Feature deep dive moved from README |
@@ -49,7 +49,7 @@ Canonical reference for **spreadsheet-cursor-mvp**, a personal side project unde
 
 - **Maintainer backlog**: local `.cursor/plans/` (gitignored); use [PRODUCT_BRIEF.md](./PRODUCT_BRIEF.md) for published milestone notes.
 - **Personal notes**: optional `docs/local/` (gitignored).
-- **Runbooks**: dev start and test commands in [README](../README.md) (§ 快速开始, § 开发与测试); pitfalls in [trouble-shoot.md](./trouble-shoot.md).
+- **Runbooks**: dev start and test commands in [README](../README.md) (§ Quick start, § Development & testing); pitfalls in [trouble-shoot.md](./trouble-shoot.md).
 
 ## When you change the codebase
 

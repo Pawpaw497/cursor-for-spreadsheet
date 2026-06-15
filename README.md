@@ -1,56 +1,58 @@
 # Cursor for Spreadsheet — MVP
 
-> **TL;DR** — 在浏览器表格里按 **Cmd+K**，用自然语言描述要改什么；后端 LLM 产出**结构化 Plan**，前端 **Diff 预览**（列高亮）后 **Apply** 写回，并可 **撤销**。支持单表与多表（join / lookup 等）。个人练手 Demo，非生产产品。
+> English primary README · 中文: [README.cn.md](README.cn.md)
 
-> **差异化 / Hook** — 结构化 Plan + 可预览 Diff + 可撤销，对比「聊天直接吐 CSV」：`Structured Plan + previewable Diff + undo` vs opaque chat-to-CSV.
+> **TL;DR** — Press **Cmd+K** in the browser spreadsheet, describe what to change in natural language; **LangGraph Agent multi-turn tool calls** (`get_schema` / `get_sample_rows` / `validate_expression`) → clarification when intent is ambiguous → structured JSON **Plan** → **Diff preview** (column highlights) → **Apply** with **undo**. Supports single-table and multi-table flows (join / lookup, etc.) and SSE streaming. Personal open-source project — no production warranty.
 
-![工作流：Cmd+K → Plan → Diff → Apply](docs/assets/demo-flow.svg)
+> **Why not output CSV directly?** — Structured Plans make every step dry-runnable, previewable, and undoable; the Agent triggers Clarification instead of guessing when intent is unclear — `Structured Plan + Agent clarification + interpretable Diff + undo` vs `opaque chat-to-CSV`.
 
-## 项目声明与许可
+![Workflow: Cmd+K → Plan → Diff → Apply](docs/assets/demo-flow.svg)
 
-- **性质**：作者个人学习与练手项目（初学者水平），非商业产品，不承诺生产可用性与长期维护。
-- **二次开发**：欢迎 fork、学习与在此基础上继续开发；使用时须**保留署名并注明来源**（见 [`LICENSE`](LICENSE)）。
-- **许可**：采用 [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/)——允许非商业使用、修改与再分发；**禁止商业使用**（含直接或间接营利、企业内部生产环境商用等），商业合作须另行取得作者书面许可。
-- **安全提示**：Demo 用途；`add_column` 表达式在浏览器内执行（`new Function`），对话与表格上下文可能以明文存于本机；**请勿上传敏感数据或在共享设备上使用**。
+## Project declaration & license
 
-## 项目概述
+- **Nature**: Personal open-source project, not a commercial product; no production warranty or long-term maintenance commitment.
+- **Forking**: Forks, learning, and derivative work are welcome; you must **keep attribution and credit the source** (see [`LICENSE`](LICENSE)).
+- **License**: [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/) — non-commercial use, modification, and redistribution allowed; **commercial use prohibited** (including direct/indirect profit or internal production use); commercial licensing requires written permission from the author.
+- **Security**: Demo only; `add_column` expressions run in the browser via `new Function`; chat and spreadsheet context may be stored in plaintext locally — **do not upload sensitive data or use on shared devices**.
 
-- **Cmd+K 工作流**：自然语言 + 表 schema / 样本行 → LLM 生成 JSON 计划 → 表格内 Diff 预览 → Apply / 撤销。
-- **单表**（`/api/plan`）与**多表项目**（`/api/plan-project`）：列/行变换、join、lookup、聚合等；前后端共享 Plan 契约。
-- **Agent 模式**（实验性）：`/api/agent`、`/api/agent-stream` — 多轮工具调用，歧义时可先澄清再出 Plan。
-- **技术栈**：React 18 + Vite + AG Grid；FastAPI + uv；OpenRouter 或本地 Ollama。
-- **阶段目标**：[`docs/PRODUCT_BRIEF.md`](docs/PRODUCT_BRIEF.md)；功能详解见 [`docs/features.md`](docs/features.md)；英文技术索引 [`docs/README.md`](docs/README.md)；英文简版 [`README.en.md`](README.en.md)。
+## Overview
 
-## 快速开始
+- **Cmd+K workflow**: Natural language + table schema / sample rows → LLM generates JSON plan → in-grid Diff preview → Apply / undo.
+- **Single-table** (`/api/plan`) and **multi-table projects** (`/api/plan-project`): column/row transforms, join, lookup, aggregation, etc.; shared Plan contract across frontend and backend.
+- **Agent mode** (experimental): `/api/agent`, `/api/agent-stream` — multi-turn tool calls; clarification before plan generation when ambiguous.
+- **Stack**: React 18 + Vite + AG Grid; FastAPI + uv; **LangGraph · Pydantic AI**; OpenRouter / local Ollama dual backends; SQLite request and LLM call audit.
+- **Milestones**: [`docs/PRODUCT_BRIEF.md`](docs/PRODUCT_BRIEF.md); feature deep dive [`docs/features.md`](docs/features.md); technical index [`docs/README.md`](docs/README.md); Chinese README [`README.cn.md`](README.cn.md).
 
-**完整步骤**（OpenRouter、`.env` 全表、首次 Cmd+K）：[`docs/getting-started.md`](docs/getting-started.md)
+## Quick start
 
-### 推荐：Ollama（零 API Key）
+**Full setup** (OpenRouter, full `.env` table, first Cmd+K): [`docs/getting-started.md`](docs/getting-started.md)
 
-1. **环境**：Python 3.10+、[uv](https://docs.astral.sh/uv/)、Node.js 18+、已安装 [Ollama](https://ollama.ai)。
+### Recommended: Ollama (no API key)
+
+1. **Prerequisites**: Python 3.10+, [uv](https://docs.astral.sh/uv/), Node.js 18+, [Ollama](https://ollama.ai) installed.
 
 ```bash
 git clone https://github.com/Pawpaw497/cursor-for-spreadsheet-mvp.git
 cd cursor-for-spreadsheet-mvp
 ```
 
-2. **本地模型**（保持 `ollama serve` 终端不关）：
+2. **Local model** (keep `ollama serve` running in a terminal):
 
 ```bash
 ollama serve
 ollama pull qwen2.5:7b
 ```
 
-3. **后端**（`server/.venv` 仅由 `uv sync` 创建，勿用仓库根目录其他 venv）：
+3. **Backend** (use `server/.venv` from `uv sync` only — not a root-level venv):
 
 ```bash
 cd server
-cp .env.example .env   # OPENROUTER_API_KEY 可留空；AUTO_START_OLLAMA=1 可尝试自动起 Ollama
+cp .env.example .env   # OPENROUTER_API_KEY can stay empty; AUTO_START_OLLAMA=1 may auto-start Ollama
 uv sync
 uv run uvicorn main:app --reload --port 8787
 ```
 
-4. **前端**（新终端）：
+4. **Frontend** (new terminal):
 
 ```bash
 cd client
@@ -58,54 +60,54 @@ npm install
 npm run dev
 ```
 
-5. 打开 **http://localhost:5173**，加载示例表后 **Cmd+K** → 选 **本地** / `qwen2.5:7b` → 输入指令（如 `在销售订单表新增金额列 = 数量 * 单价`）→ **Generate Plan** → **Apply**。示例提示词见 [`test-data/test-prompts.md`](test-data/test-prompts.md)。
+5. Open **http://localhost:5173**, load a sample table, then **Cmd+K** → select **Local** / `qwen2.5:7b` → enter a prompt (e.g. `Add amount column = quantity * unit price on sales orders`) → **Generate Plan** → **Apply**. Sample prompts: [`test-data/test-prompts.md`](test-data/test-prompts.md).
 
-### 可选：OpenRouter 云端
+### Optional: OpenRouter (cloud)
 
-在 `server/.env` 填入 `OPENROUTER_API_KEY`；前端切换「云端」与模型下拉。详见 [`docs/getting-started.md`](docs/getting-started.md) Path B。
+Set `OPENROUTER_API_KEY` in `server/.env`; switch to **Cloud** and pick a model in the UI. See [`docs/getting-started.md`](docs/getting-started.md) Path B.
 
-### 一键启动（可选）
+### One-command start (optional)
 
 ```bash
-make dev    # 后台起 API(8787) + Vite(5173)；结束请手动停进程
+make dev    # API (8787) + Vite (5173) in background; stop processes manually when done
 ```
 
 ---
 
-## 开发与测试
+## Development & testing
 
 ```bash
-make test           # 后端 pytest + 前端 Vitest
+make test           # backend pytest + frontend Vitest
 make test-server    # cd server && uv sync && uv run pytest -q
 make test-client    # cd client && npm ci && npm test
 ```
 
-或分目录执行（与 CI 一致）：
+Or per directory (matches CI):
 
 ```bash
 cd server && uv sync && uv run pytest -q
 cd client && npm ci && npm test
 ```
 
-可选云端 E2E（需 Key，CI 不跑）：`RUN_CLOUD_LLM_E2E=1 uv run pytest tests/test_cloud_llm_sample_e2e.py -m integration -q`（在 `server/` 下）。
+Optional cloud E2E (requires API key; not run in CI): `RUN_CLOUD_LLM_E2E=1 uv run pytest tests/test_cloud_llm_sample_e2e.py -m integration -q` (from `server/`).
 
-日志与 SQLite 审计：[`docs/logging-and-debug.md`](docs/logging-and-debug.md)
+Logging and SQLite audit: [`docs/logging-and-debug.md`](docs/logging-and-debug.md)
 
 ---
 
-## 更多文档
+## More documentation
 
-| 类型 | 位置 |
-|------|------|
-| 许可与二次开发 | 本 README § 项目声明与许可、[`LICENSE`](LICENSE)、[`CONTRIBUTING.md`](CONTRIBUTING.md) |
-| 完整环境与首次体验 | [`docs/getting-started.md`](docs/getting-started.md) |
-| 功能详解（Agent 澄清、预览生命周期等） | [`docs/features.md`](docs/features.md) |
-| 英文简版 README | [`README.en.md`](README.en.md) |
-| 技术参考（英文） | [`docs/README.md`](docs/README.md) |
-| 里程碑 / 需求单 | [`docs/PRODUCT_BRIEF.md`](docs/PRODUCT_BRIEF.md) |
-| 开发与测试 | 本 README § 开发与测试、根目录 [`Makefile`](Makefile) |
-| 工作流示意图 | [`docs/assets/demo-flow.svg`](docs/assets/demo-flow.svg) |
-| Cursor AI 可见范围 | [`.cursorignore`](.cursorignore)、[`.cursorindexingignore`](.cursorindexingignore) |
-| 本地私人笔记（不提交） | `docs/local/`（见 [`.gitignore`](.gitignore)） |
+| Topic | Location |
+|-------|----------|
+| License & forking | This README § Project declaration & license, [`LICENSE`](LICENSE), [`CONTRIBUTING.md`](CONTRIBUTING.md) |
+| Full setup & first run | [`docs/getting-started.md`](docs/getting-started.md) |
+| Features (Agent clarification, preview lifecycle, etc.) | [`docs/features.md`](docs/features.md) |
+| Chinese README | [`README.cn.md`](README.cn.md) |
+| Technical reference | [`docs/README.md`](docs/README.md) |
+| Milestones / requirements | [`docs/PRODUCT_BRIEF.md`](docs/PRODUCT_BRIEF.md) |
+| Dev & test | This README § Development & testing, root [`Makefile`](Makefile) |
+| Workflow diagram | [`docs/assets/demo-flow.svg`](docs/assets/demo-flow.svg) |
+| Cursor AI visibility | [`.cursorignore`](.cursorignore), [`.cursorindexingignore`](.cursorindexingignore) |
+| Local private notes (not committed) | `docs/local/` (see [`.gitignore`](.gitignore)) |
 
-`docs/` 下 canonical 文档随仓库分发；`scripts/`、`docs/local/`、**`.cursor/`** 默认不提交（见 [`.gitignore`](.gitignore)）。**`.cursor/`** 为维护者本机 Cursor 工作区（rules / plans / skills），公开 clone **不包含**；路人可忽略，公开路线图以 [`docs/PRODUCT_BRIEF.md`](docs/PRODUCT_BRIEF.md) 为准。
+Canonical docs under `docs/` ship with the repo; `scripts/`, `docs/local/`, and **`.cursor/`** are not committed by default (see [`.gitignore`](.gitignore)). **`.cursor/`** is the maintainer's local Cursor workspace (rules / plans / skills) and is **not** included in public clones; public roadmap: [`docs/PRODUCT_BRIEF.md`](docs/PRODUCT_BRIEF.md).
