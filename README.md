@@ -21,7 +21,7 @@
 - **Single-table** (`/api/plan`) and **multi-table projects** (`/api/plan-project`): column/row transforms, join, lookup, aggregation, etc.; shared Plan contract across frontend and backend.
 - **Agent mode** (experimental): `/api/agent`, `/api/agent-stream` — multi-turn tool calls; clarification before plan generation when ambiguous.
 - **Stack**: React 18 + Vite + AG Grid; FastAPI + uv; **LangGraph · Pydantic AI**; OpenRouter / local Ollama dual backends; SQLite request and LLM call audit.
-- **Milestones**: [`docs/PRODUCT_BRIEF.md`](docs/PRODUCT_BRIEF.md); feature deep dive [`docs/features.md`](docs/features.md); technical index [`docs/README.md`](docs/README.md); Chinese README [`README.cn.md`](README.cn.md).
+- **Milestones**: feature deep dive [`docs/features.md`](docs/features.md); technical index [`docs/README.md`](docs/README.md); Chinese README [`README.cn.md`](README.cn.md).
 
 ## Quick start
 
@@ -104,10 +104,9 @@ Logging and SQLite audit: [`docs/logging-and-debug.md`](docs/logging-and-debug.m
 | Features (Agent clarification, preview lifecycle, etc.) | [`docs/features.md`](docs/features.md) |
 | Chinese README | [`README.cn.md`](README.cn.md) |
 | Technical reference | [`docs/README.md`](docs/README.md) |
-| Milestones / requirements | [`docs/PRODUCT_BRIEF.md`](docs/PRODUCT_BRIEF.md) |
 | Dev & test | This README § Development & testing, root [`Makefile`](Makefile) |
 | Workflow diagram | [`docs/assets/demo-flow.svg`](docs/assets/demo-flow.svg) |
 | Cursor AI visibility | [`.cursorignore`](.cursorignore), [`.cursorindexingignore`](.cursorindexingignore) |
 | Local private notes (not committed) | `docs/local/` (see [`.gitignore`](.gitignore)) |
 
-Canonical docs under `docs/` ship with the repo; `scripts/`, `docs/local/`, and **`.cursor/`** are not committed by default (see [`.gitignore`](.gitignore)). **`.cursor/`** is the maintainer's local Cursor workspace (rules / plans / skills) and is **not** included in public clones; public roadmap: [`docs/PRODUCT_BRIEF.md`](docs/PRODUCT_BRIEF.md).
+Canonical docs under `docs/` ship with the repo; `scripts/`, `docs/local/`, and **`.cursor/`** are not committed by default (see [`.gitignore`](.gitignore)). **`.cursor/`** is the maintainer's local Cursor workspace (rules / plans / skills) and is **not** included in public clones.

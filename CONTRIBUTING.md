@@ -54,7 +54,7 @@ Cloud LLM E2E (`RUN_CLOUD_LLM_E2E=1`) is **not** run in CI; optional locally wit
 
 ## Maintainer notes
 
-- `.cursor/` (rules, plans, skills) is **gitignored** and local-only; it is not the public roadmap. See [docs/PRODUCT_BRIEF.md](docs/PRODUCT_BRIEF.md) for published milestone intent.
+- `.cursor/` (rules, plans, skills) is **gitignored** and local-only; it is not the public roadmap.
 - Do not commit secrets (`.env`), `server/data/`, or `logs/`.
 
 Questions and small fixes are welcome via issues or PRs.

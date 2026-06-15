@@ -21,7 +21,7 @@
 - **单表**（`/api/plan`）与**多表项目**（`/api/plan-project`）：列/行变换、join、lookup、聚合等；前后端共享 Plan 契约。
 - **Agent 模式**（实验性）：`/api/agent`、`/api/agent-stream` — 多轮工具调用，歧义时可先澄清再出 Plan。
 - **技术栈**：React 18 + Vite + AG Grid；FastAPI + uv；**LangGraph · Pydantic AI**；OpenRouter / 本地 Ollama 双后端；SQLite 请求与 LLM 调用审计。
-- **阶段目标**：[`docs/PRODUCT_BRIEF.md`](docs/PRODUCT_BRIEF.md)；功能详解见 [`docs/features.md`](docs/features.md)；技术索引 [`docs/README.md`](docs/README.md)；英文主 README [`README.md`](README.md)。
+- **阶段目标**：功能详解见 [`docs/features.md`](docs/features.md)；技术索引 [`docs/README.md`](docs/README.md)；英文主 README [`README.md`](README.md)。
 
 ## 快速开始
 
@@ -105,10 +105,9 @@ cd client && npm ci && npm test
 | 中文 README | [`README.cn.md`](README.cn.md) |
 | 英文主 README | [`README.md`](README.md) |
 | 技术参考（英文） | [`docs/README.md`](docs/README.md) |
-| 里程碑 / 需求单 | [`docs/PRODUCT_BRIEF.md`](docs/PRODUCT_BRIEF.md) |
 | 开发与测试 | 本 README § 开发与测试、根目录 [`Makefile`](Makefile) |
 | 工作流示意图 | [`docs/assets/demo-flow.svg`](docs/assets/demo-flow.svg) |
 | Cursor AI 可见范围 | [`.cursorignore`](.cursorignore)、[`.cursorindexingignore`](.cursorindexingignore) |
 | 本地私人笔记（不提交） | `docs/local/`（见 [`.gitignore`](.gitignore)） |
 
-`docs/` 下 canonical 文档随仓库分发；`scripts/`、`docs/local/`、**`.cursor/`** 默认不提交（见 [`.gitignore`](.gitignore)）。**`.cursor/`** 为维护者本机 Cursor 工作区（rules / plans / skills），公开 clone **不包含**；路人可忽略，公开路线图以 [`docs/PRODUCT_BRIEF.md`](docs/PRODUCT_BRIEF.md) 为准。
+`docs/` 下 canonical 文档随仓库分发；`scripts/`、`docs/local/`、**`.cursor/`** 默认不提交（见 [`.gitignore`](.gitignore)）。**`.cursor/`** 为维护者本机 Cursor 工作区（rules / plans / skills），公开 clone **不包含**。

@@ -12,7 +12,7 @@ Canonical reference for **spreadsheet-cursor-mvp**, a personal side project unde
 | [getting-started.md](./getting-started.md) | English | Detailed setup (Ollama + OpenRouter) |
 | [features.md](./features.md) | 中文 | Feature deep dive moved from README |
 
-**Out of scope**: `docs/goals.md` (unused). Milestone intent: [PRODUCT_BRIEF.md](./PRODUCT_BRIEF.md). `.cursor/` is gitignored (local maintainer workspace only).
+**Out of scope**: `docs/goals.md` (unused). `.cursor/` is gitignored (local maintainer workspace only).
 
 ## Documents
 
@@ -25,7 +25,6 @@ Canonical reference for **spreadsheet-cursor-mvp**, a personal side project unde
 | [client-storage.md](./client-storage.md) | Frontend | Browser `localStorage` keys, workspace memory, session sync, privacy |
 | [agent-improvements.md](./agent-improvements.md) | Agent roadmap | Historical upgrade notes; see banner for what is already shipped |
 | [trouble-shoot.md](./trouble-shoot.md) | Developers | Known issues and common pitfalls |
-| [PRODUCT_BRIEF.md](./PRODUCT_BRIEF.md) | Personal planning | Open-source readiness milestone, backlog |
 | [getting-started.md](./getting-started.md) | Setup | Full Quick Start beyond root README |
 | [features.md](./features.md) | Users / devs | MVP features, Agent clarification, preview |
 | [logging-and-debug.md](./logging-and-debug.md) | Dev / ops | Trace IDs, audit SQLite, LLM debug NDJSON |
@@ -47,7 +46,7 @@ Canonical reference for **spreadsheet-cursor-mvp**, a personal side project unde
 
 ## What is not here
 
-- **Maintainer backlog**: local `.cursor/plans/` (gitignored); use [PRODUCT_BRIEF.md](./PRODUCT_BRIEF.md) for published milestone notes.
+- **Maintainer backlog**: local `.cursor/plans/` (gitignored).
 - **Personal notes**: optional `docs/local/` (gitignored).
 - **Runbooks**: dev start and test commands in [README](../README.md) (§ Quick start, § Development & testing); pitfalls in [trouble-shoot.md](./trouble-shoot.md).
 
