@@ -68,7 +68,7 @@ On **confirm**, if the committed tables’ fingerprint differs, the API returns 
 
 ## SSE events
 
-With `previewLifecycle: true`, `/api/agent-stream` may emit `preview_ready` in addition to `tool_call`, `tool_result`, `plan_done`, `clarification`, `finish`.
+With `previewLifecycle: true`, `/api/agent-stream` emits `preview_ready` then `plan_done` on success (sync returns a single `kind: "preview_ready"` JSON). Full event contract, ordering, and client mapping: [agent-streaming.md](./agent-streaming.md).
 
 ## Key request fields (`AgentProjectPlanRequest`)
 

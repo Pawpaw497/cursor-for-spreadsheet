@@ -40,7 +40,7 @@
 
 - 续跑：`clarificationReply` + `clarificationTurnId`；Q/A 写入 `agentTranscript`（`[Clarification]` 格式）。
 - 选区感知：当 `context.activeTable` / `focusedColumn` 已消歧时，规则路径可跳过澄清。
-- SSE：`clarification` 终端事件；可选 `VITE_AGENT_USE_STREAM=true` 走 `/api/agent-stream`。
+- SSE：`tool_call` / `tool_result` 步骤事件 + 终端 `plan_done`、`preview_ready`、`clarification`、`finish`；可选 `VITE_AGENT_USE_STREAM=true` 走 `/api/agent-stream`（与同步 `/api/agent` 结果对齐）。详见 [`agent-streaming.md`](agent-streaming.md)。
 - 遥测：后端 `agent_clarification` / `clarification_resolved` 日志；前端 `logInfo` 同名事件。
 
 ### Agent 预览生命周期

@@ -35,6 +35,27 @@ Known issues and common developer pitfalls. For setup see [getting-started.md](.
 
 ---
 
+## Agent preview / fingerprint
+
+| Symptom | Likely cause | What to check |
+|---------|--------------|---------------|
+| HTTP 409 `stale_preview` on Confirm | Tables changed after preview was created | Response `staleReason`: `structure` (schema/row count) vs `content` (cell values). Re-generate preview or revert edits; see [agent-preview-lifecycle.md](./agent-preview-lifecycle.md) § Fingerprint |
+| HTTP 429 on Revise loop | Revision cap | `MAX_AGENT_PREVIEW_REVISIONS = 5`; start a fresh generate |
+| Preview never appears (legacy plan only) | No execution tables | Set `projectId` or `previewTables`; lifecycle needs a dry-run source |
+
+---
+
+## Agent SSE (`/api/agent-stream`)
+
+| Symptom | Likely cause | What to check |
+|---------|--------------|---------------|
+| UI still uses sync agent | Stream not enabled | `VITE_AGENT_USE_STREAM=true` in `client/.env.local`; restart Vite — see [agent-streaming.md](./agent-streaming.md) |
+| `agent-stream ended without a terminal event` | Stream closed early | Network/proxy buffering; backend crash mid-stream — grep trace in uvicorn log |
+| `agent-stream finish: max_turns` | Turn budget exhausted | Increase `maxTurns` on request or simplify prompt |
+| SSE shows `preview_ready` but UI ignores it | Mapper picks wrong terminal | `mapAgentStreamEventsToResult` prefers `preview_ready` over trailing `plan_done` — ensure client is current |
+
+---
+
 ## Storage / memory
 
 | Symptom | Likely cause | What to check |

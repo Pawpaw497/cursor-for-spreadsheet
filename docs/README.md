@@ -20,6 +20,7 @@ Canonical reference for **spreadsheet-cursor-mvp**, a personal side project unde
 |----------|----------|---------|
 | [architecture.md](./architecture.md) | Full-stack | Components, API surface, plan execution paths, observability |
 | [plan-step-types-reference.md](./plan-step-types-reference.md) | LLM / backend / frontend | Plan JSON contract: every `action`, fields, and semantics |
+| [agent-streaming.md](./agent-streaming.md) | Agent / API | `/api/agent-stream` SSE events, sync parity, client opt-in |
 | [agent-preview-lifecycle.md](./agent-preview-lifecycle.md) | Agent / API | Server-side preview, confirm / abort / revise, fingerprints |
 | [agent-memory.md](./agent-memory.md) | Agent / frontend / backend | Workspace memory schema, prompt injection, compaction, optional server session store |
 | [client-storage.md](./client-storage.md) | Frontend | Browser `localStorage` keys, workspace memory, session sync, privacy |
@@ -41,6 +42,7 @@ Canonical reference for **spreadsheet-cursor-mvp**, a personal side project unde
 | Agent orchestration | `server/app/agent/orchestrator.py`, `pa_decision.py`, `pa_tools.py` |
 | Agent memory / compaction | `server/app/agent/memory_context.py`, `memory_compaction.py`, `context_assembler.py` |
 | Agent preview | `server/app/services/agent_preview.py` |
+| Agent SSE (client) | `client/src/agentStream.ts`, `client/src/agentProjectPlan.ts` |
 | Session memory (optional) | `server/app/api/routes/sessions.py`, `services/session_store.py` |
 | Workspace memory (client) | `client/src/workspaceMemory.ts`, `sessionMemorySync.ts`, `memoryCompaction.ts` |
 

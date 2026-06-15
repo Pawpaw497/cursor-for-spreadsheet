@@ -66,6 +66,17 @@ RUN_CLOUD_LLM_E2E=1 E2E_CLOUD_MODEL_ID=google/gemini-2.5-flash-lite \
   uv run pytest tests/test_cloud_llm_sample_e2e.py -q
 ```
 
+## Client env (optional)
+
+Create `client/.env.local` for Vite-only flags (not committed):
+
+| Key | Purpose |
+|-----|---------|
+| `VITE_AGENT_USE_STREAM=true` | Route Agent **Generate Plan** through `POST /api/agent-stream` instead of sync `/api/agent` — see [agent-streaming.md](./agent-streaming.md) |
+| `VITE_ENABLE_CONSOLE_LOG=0` | Quiet non-error browser logs — see [logging-and-debug.md](./logging-and-debug.md) |
+
+Restart `npm run dev` after changing client env vars.
+
 ## Backend `.env` reference
 
 Copy from `server/.env.example`. Common keys:
@@ -105,6 +116,7 @@ Import Excel/CSV via toolbar; imports time out after ~20 s with a visible messag
 |-------|-----|
 | MVP features | [features.md](./features.md) |
 | Agent clarification | [agent-improvements.md](./agent-improvements.md), `server/app/agent/clarification.py` |
+| Agent SSE streaming | [agent-streaming.md](./agent-streaming.md) |
 | Agent preview lifecycle | [agent-preview-lifecycle.md](./agent-preview-lifecycle.md) |
 | Browser storage | [client-storage.md](./client-storage.md) |
 | Agent memory | [agent-memory.md](./agent-memory.md) |
