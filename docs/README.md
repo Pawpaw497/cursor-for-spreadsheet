@@ -47,7 +47,7 @@ Canonical reference for **spreadsheet-cursor-mvp**, a personal side project unde
 ## What is not here
 
 - **Maintainer backlog**: local `.cursor/plans/` (gitignored).
-- **Personal notes**: optional `docs/local/` (gitignored).
+- **Personal notes**: optional `docs/local/` (gitignored). Maintainer milestones: `docs/local/PRODUCT_BRIEF.md`. Other typical local-only files: interview notes, resume drafts—never committed.
 - **Runbooks**: dev start and test commands in [README](../README.md) (§ Quick start, § Development & testing); pitfalls in [trouble-shoot.md](./trouble-shoot.md).
 
 ## When you change the codebase

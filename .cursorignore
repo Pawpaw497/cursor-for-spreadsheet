@@ -17,7 +17,8 @@ py.env
 example.env
 
 # --- Local-only (not in repo; explicit if present) ---
-docs/local/
+docs/local/*
+!docs/local/PRODUCT_BRIEF.md
 scripts/
 .history/
 /env
