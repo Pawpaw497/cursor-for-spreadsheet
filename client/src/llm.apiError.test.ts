@@ -20,4 +20,22 @@ describe("parseApiErrorMessage", () => {
   it("falls back to status-prefixed raw text", () => {
     expect(parseApiErrorMessage(500, "internal error")).toBe("[500] internal error");
   });
+
+  it("maps stale_preview content to user-facing message", () => {
+    const txt = JSON.stringify({
+      detail: { kind: "error", reason: "stale_preview", staleReason: "content" }
+    });
+    expect(parseApiErrorMessage(409, txt)).toBe(
+      "[409] Preview is stale: table data changed after preview. Regenerate preview."
+    );
+  });
+
+  it("maps stale_preview structure to user-facing message", () => {
+    const txt = JSON.stringify({
+      detail: { kind: "error", reason: "stale_preview", staleReason: "structure" }
+    });
+    expect(parseApiErrorMessage(409, txt)).toBe(
+      "[409] Preview is stale: table structure changed after preview. Regenerate preview."
+    );
+  });
 });

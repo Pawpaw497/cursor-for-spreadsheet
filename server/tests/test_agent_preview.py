@@ -11,10 +11,14 @@ from app.models.plan import ExecuteTable, Plan
 from app.services.agent_preview import (
     MAX_AGENT_PREVIEW_REVISIONS,
     PREVIEW_TABLES_MAX_ROWS_PER_TABLE,
+    build_preview_record,
+    classify_stale_preview_reason,
     dry_run_plan_on_tables,
     execution_result_to_execute_plan_response,
     execution_tables_from_execute_tables,
     fingerprint_execution_tables,
+    fingerprint_execution_tables_content_only,
+    fingerprint_execution_tables_structure_only,
     merge_preview_history_mark_aborted,
     project_state_to_execution_tables,
 )
@@ -169,6 +173,164 @@ def test_agent_endpoint_without_preview_flag_returns_plan_shape(client: TestClie
     data = resp.json()
     assert "plan" in data
     assert data["plan"]["steps"]
+
+
+def _table_a(*, rows: list[dict[str, int]]) -> TableData:
+    return TableData(
+        name="A",
+        rows=rows,
+        schema=[SchemaCol(key="k", type="number")],
+    )
+
+
+def test_fingerprint_differs_when_cell_value_changes() -> None:
+    """相同 schema/行数、不同单元格值 → 不同指纹。"""
+    t1 = {"A": _table_a(rows=[{"k": 1}])}
+    t2 = {"A": _table_a(rows=[{"k": 2}])}
+    assert fingerprint_execution_tables_structure_only(t1) == fingerprint_execution_tables_structure_only(t2)
+    assert fingerprint_execution_tables(t1) != fingerprint_execution_tables(t2)
+
+
+def test_fingerprint_differs_when_structure_changes() -> None:
+    """增行或改 schema → 结构指纹与全量指纹均变化。"""
+    base = {"A": _table_a(rows=[{"k": 1}])}
+    more_rows = {"A": _table_a(rows=[{"k": 1}, {"k": 2}])}
+    new_schema = {
+        "A": TableData(
+            name="A",
+            rows=[{"k": 1}],
+            schema=[SchemaCol(key="k", type="number"), SchemaCol(key="x", type="string")],
+        )
+    }
+    fp_base = fingerprint_execution_tables(base)
+    assert fingerprint_execution_tables(more_rows) != fp_base
+    assert fingerprint_execution_tables(new_schema) != fp_base
+    assert fingerprint_execution_tables_structure_only(more_rows) != fingerprint_execution_tables_structure_only(base)
+    assert fingerprint_execution_tables_structure_only(new_schema) != fingerprint_execution_tables_structure_only(base)
+
+
+def test_fingerprint_content_bounded_by_row_cap() -> None:
+    """超过行上限的尾部行不参与内容指纹；上限内修改仍会改变内容指纹。"""
+    rows_in_cap = [{"k": i} for i in range(PREVIEW_TABLES_MAX_ROWS_PER_TABLE)]
+    rows_beyond_cap = rows_in_cap + [{"k": 999_999}]
+    rows_tail_changed = rows_in_cap + [{"k": 888_888}]
+    rows_in_cap_changed = [{"k": i} for i in range(PREVIEW_TABLES_MAX_ROWS_PER_TABLE - 1)] + [{"k": 42}]
+    same_row_count_tail_changed = rows_in_cap[:-1] + [{"k": 999_999}]
+
+    schema = [SchemaCol(key="k", type="number")]
+    t_cap = {"S": TableData(name="S", rows=rows_in_cap, schema=schema)}
+    t_beyond = {"S": TableData(name="S", rows=rows_beyond_cap, schema=schema)}
+    t_tail = {"S": TableData(name="S", rows=rows_tail_changed, schema=schema)}
+    t_in_cap = {"S": TableData(name="S", rows=rows_in_cap_changed, schema=schema)}
+    t_same_count_tail = {
+        "S": TableData(name="S", rows=same_row_count_tail_changed, schema=schema),
+    }
+
+    assert fingerprint_execution_tables_content_only(t_cap) == fingerprint_execution_tables_content_only(t_beyond)
+    assert fingerprint_execution_tables_content_only(t_cap) == fingerprint_execution_tables_content_only(t_tail)
+    assert fingerprint_execution_tables_content_only(t_cap) != fingerprint_execution_tables_content_only(t_in_cap)
+    assert fingerprint_execution_tables_content_only(t_cap) != fingerprint_execution_tables_content_only(t_same_count_tail)
+    assert fingerprint_execution_tables_structure_only(t_beyond) != fingerprint_execution_tables_structure_only(t_cap)
+
+
+def test_classify_stale_preview_reason_content_vs_structure() -> None:
+    """复合指纹可区分仅内容变化与结构变化。"""
+    original = {"A": _table_a(rows=[{"k": 1}])}
+    content_changed = {"A": _table_a(rows=[{"k": 9}])}
+    structure_changed = {"A": _table_a(rows=[{"k": 1}, {"k": 2}])}
+    expected = fingerprint_execution_tables(original)
+    assert classify_stale_preview_reason(expected, content_changed) == "content"
+    assert classify_stale_preview_reason(expected, structure_changed) == "structure"
+
+
+def test_confirm_returns_409_stale_preview_on_structure_change(client: TestClient) -> None:
+    """confirm 路径在结构变化时返回 409 stale_preview 且 staleReason=structure（无 LLM）。"""
+    preview_tables = [_table_a(rows=[{"k": 1}])]
+    exec_tables = {"A": preview_tables[0]}
+    fp_at_preview = fingerprint_execution_tables(exec_tables)
+    rec = build_preview_record(
+        plan=_simple_plan(),
+        diff={"addedColumns": ["x"], "modifiedColumns": [], "validationWarnings": [], "validationErrors": []},
+        new_tables=[],
+        tables_fingerprint=fp_at_preview,
+    )
+    body = {
+        "prompt": "confirm",
+        "tables": [{"name": "A", "schema": [{"key": "k", "type": "number"}], "sampleRows": [{"k": 1}, {"k": 2}]}],
+        "history": [],
+        "previewLifecycle": True,
+        "previewDecision": "confirm",
+        "previewId": rec.id,
+        "previewHistory": [
+            {
+                "id": rec.id,
+                "plan": rec.plan,
+                "diff": rec.diff,
+                "newTables": rec.new_tables,
+                "status": rec.status,
+                "tables_fingerprint_at_preview": fp_at_preview,
+                "created_at": rec.created_at,
+            }
+        ],
+        "commitPlan": _simple_plan().model_dump(),
+        "previewTables": [
+            {
+                "name": "A",
+                "rows": [{"k": 1}, {"k": 2}],
+                "schema": [{"key": "k", "type": "number"}],
+            }
+        ],
+    }
+    resp = client.post("/api/agent", json=body)
+    assert resp.status_code == 409
+    detail = resp.json()["detail"]
+    assert detail["reason"] == "stale_preview"
+    assert detail["staleReason"] == "structure"
+
+
+def test_confirm_returns_409_stale_preview_on_content_change(client: TestClient) -> None:
+    """confirm 路径在内容变化时返回 409 stale_preview（无 LLM）。"""
+    preview_tables = [_table_a(rows=[{"k": 1}])]
+    exec_tables = {"A": preview_tables[0]}
+    fp_at_preview = fingerprint_execution_tables(exec_tables)
+    rec = build_preview_record(
+        plan=_simple_plan(),
+        diff={"addedColumns": ["x"], "modifiedColumns": [], "validationWarnings": [], "validationErrors": []},
+        new_tables=[],
+        tables_fingerprint=fp_at_preview,
+    )
+    body = {
+        "prompt": "confirm",
+        "tables": [{"name": "A", "schema": [{"key": "k", "type": "number"}], "sampleRows": [{"k": 2}]}],
+        "history": [],
+        "previewLifecycle": True,
+        "previewDecision": "confirm",
+        "previewId": rec.id,
+        "previewHistory": [
+            {
+                "id": rec.id,
+                "plan": rec.plan,
+                "diff": rec.diff,
+                "newTables": rec.new_tables,
+                "status": rec.status,
+                "tables_fingerprint_at_preview": fp_at_preview,
+                "created_at": rec.created_at,
+            }
+        ],
+        "commitPlan": _simple_plan().model_dump(),
+        "previewTables": [
+            {
+                "name": "A",
+                "rows": [{"k": 2}],
+                "schema": [{"key": "k", "type": "number"}],
+            }
+        ],
+    }
+    resp = client.post("/api/agent", json=body)
+    assert resp.status_code == 409
+    detail = resp.json()["detail"]
+    assert detail["reason"] == "stale_preview"
+    assert detail["staleReason"] == "content"
 
 
 def test_agent_endpoint_accepts_preview_lifecycle_payload(client: TestClient) -> None:

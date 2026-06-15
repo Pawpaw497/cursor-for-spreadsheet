@@ -55,13 +55,12 @@ sequenceDiagram
 
 ## Fingerprint (staleness check)
 
-On preview creation, `tables_fingerprint_at_preview` hashes per table:
+On preview creation, `tables_fingerprint_at_preview` is a composite `{structure_hash}:{content_hash}`:
 
-- table name
-- row count
-- schema column keys (not cell values)
+- **Structure**: per table — name, row count, schema column keys
+- **Content**: per table — up to `PREVIEW_TABLES_MAX_ROWS_PER_TABLE` rows of cell values (stable JSON key order)
 
-On **confirm**, if the committed tables’ fingerprint differs, the API rejects the commit so the user does not apply a stale preview.
+On **confirm**, if the committed tables’ fingerprint differs, the API returns HTTP 409 with `reason: "stale_preview"` and `staleReason: "structure" | "content"` (structure hash mismatch vs content-only drift).
 
 ## Revision limit
 

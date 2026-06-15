@@ -26,6 +26,7 @@ from app.models.plan import plan_to_wire_dict, preview_record_to_wire_dict
 from app.models.plan import ConversationTurn
 from app.services.agent_preview import (
     MAX_AGENT_PREVIEW_REVISIONS,
+    classify_stale_preview_reason,
     dry_run_plan_on_tables,
     execution_result_to_execute_plan_response,
     fingerprint_execution_tables,
@@ -173,11 +174,13 @@ async def agent(req: AgentProjectPlanRequest):
             )
         fp_now = fingerprint_execution_tables(current_tables)
         if fp_expected and fp_now != fp_expected:
+            stale_reason = classify_stale_preview_reason(str(fp_expected), current_tables)
             raise HTTPException(
                 status_code=409,
                 detail={
                     "kind": "error",
                     "reason": "stale_preview",
+                    "staleReason": stale_reason,
                     "expectedFingerprint": fp_expected,
                     "currentFingerprint": fp_now,
                 },
