@@ -20,6 +20,7 @@ from app.agent.actions import (
     PreviewReadyAction,
 )
 from app.agent.state import AgentState
+from app.agent.preview_telemetry import log_preview_cap_hit, log_preview_revision
 from app.logging_config import get_logger
 from app.models import AgentProjectPlanRequest, Plan, PlanResponse
 from app.models.plan import plan_to_wire_dict, preview_record_to_wire_dict
@@ -30,6 +31,7 @@ from app.services.agent_preview import (
     dry_run_plan_on_tables,
     execution_result_to_execute_plan_response,
     fingerprint_execution_tables,
+    last_pending_preview,
     merge_preview_history_mark_aborted,
     merge_preview_history_mark_committed,
     merge_preview_history_mark_revised,
@@ -209,6 +211,28 @@ async def agent(req: AgentProjectPlanRequest):
 
     if req.previewDecision == "revise":
         if req.revisionCount >= MAX_AGENT_PREVIEW_REVISIONS:
+            pending = last_pending_preview(list(req.previewHistory or []))
+            if pending is not None:
+                log_preview_cap_hit(
+                    revision_count=req.revisionCount,
+                    preview_id=pending.id,
+                    source="user_revise",
+                )
+                plan_obj = Plan.model_validate(pending.plan)
+                return {
+                    "kind": "preview_ready",
+                    "plan": plan_to_wire_dict(plan_obj),
+                    "preview": preview_record_to_wire_dict(pending),
+                    "previewHistory": [
+                        preview_record_to_wire_dict(h)
+                        for h in (req.previewHistory or [])
+                    ],
+                    "warnings": [
+                        f"Preview revision limit ({MAX_AGENT_PREVIEW_REVISIONS}) reached.",
+                        "You may confirm this preview, abort, or rephrase your request.",
+                    ],
+                    "state": {"revision_count": req.revisionCount},
+                }
             raise HTTPException(
                 status_code=429,
                 detail={
@@ -222,6 +246,12 @@ async def agent(req: AgentProjectPlanRequest):
                 status_code=400,
                 detail={"kind": "error", "reason": "preview_id_and_revision_message_required"},
             )
+        log_preview_revision(
+            revision_count=req.revisionCount + 1,
+            preview_id=req.previewId,
+            source="user_revise",
+            reason_preview=(req.revisionMessage or "").strip(),
+        )
         hist = merge_preview_history_mark_revised(
             list(req.previewHistory or []),
             req.previewId,
@@ -281,7 +311,7 @@ def _map_agent_result_to_response(
 
     if kind == "preview_ready":
         pra = cast(PreviewReadyAction, action)
-        return {
+        resp: dict[str, Any] = {
             "kind": "preview_ready",
             "plan": plan_to_wire_dict(pra.payload.plan),
             "preview": preview_record_to_wire_dict(pra.payload.preview),
@@ -290,6 +320,9 @@ def _map_agent_result_to_response(
             ],
             "state": final_state.to_dict(),
         }
+        if pra.payload.warnings:
+            resp["warnings"] = pra.payload.warnings
+        return resp
 
     if kind == "output_plan":
         return PlanResponse(plan=cast(OutputPlanAction, action).payload)
