@@ -14,6 +14,7 @@ Structured logging on both tiers; use `traceId` / `X-Request-ID` to correlate br
 
 - Prefix **`[APP]`**; fields include `level`, `event`, `sessionId`, `ts`.
 - Common events: `app_open`, `cmdk_open`, `cmdk_prompt_submit`, `request_start` / `request_success` / `request_error`, `plan_response`, `diff_preview_shown`, `plan_apply_click`, `plan_apply_success` / `plan_apply_error`.
+- Agent stream (when `VITE_AGENT_USE_STREAM=true`): `agent_stream_fetch_failed`, `agent_stream_clarification`, `agent_stream_done` — see [agent-stream-sse.md](./agent-stream-sse.md).
 - Dev builds log `info` by default; set `VITE_ENABLE_CONSOLE_LOG=0` to quiet non-errors.
 
 ## Backend (uvicorn terminal)

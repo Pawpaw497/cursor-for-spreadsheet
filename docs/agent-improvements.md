@@ -12,7 +12,7 @@
 | 澄清（`ask_user` + 规则 `maybe_need_clarification`） | ✅ | `clarification.py`, `pa_decision.py` |
 | 预览生命周期 confirm/abort/revise | ✅ | [`agent-preview-lifecycle.md`](agent-preview-lifecycle.md) |
 | 可选服务端会话备份（Stage 6） | ✅（默认关） | `api/routes/sessions.py` |
-| 流式 SSE 前端默认接入 | 部分 | `VITE_AGENT_USE_STREAM` 可选 |
+| 流式 SSE 前端接入 | ✅（可选） | `VITE_AGENT_USE_STREAM=true` → `agentStream.ts` / `agentProjectPlan.ts`；见 [`agent-stream-sse.md`](agent-stream-sse.md) |
 | 分步执行 / 服务端回滚 | 未做 | 仍一次性 Apply |
 
 ---
@@ -34,8 +34,8 @@
 |----------------|--------------------------|----------------------------------------|------------|
 | **实现骨架**   | ✅ **已实现**（见第三节 3.5） | **AgentState + 动作枚举 + decision + run_agent_loop** | **高（已落地）** |
 | 执行模式       | 一次生成整份计划         | 多步推理 / 工具调用 / 分步执行与观察   | 高         |
-| 流式与可观测   | 基础 SSE 已有（`/api/agent-stream`） | 流式输出 + 推理/工具步骤可观测（前端接入中） | 高         |
-| 对话与记忆     | Agent 支持 history / appliedPlansSummary，但前端暂未全面利用 | 多轮对话 + 会话/项目级记忆             | 中         |
+| 流式与可观测   | ✅ SSE 事件流 + 可选前端接入 | 流式输出 + 推理/工具步骤 UI 展示 | 中         |
+| 对话与记忆     | ✅ workspace memory + server session（可选） | 多轮对话 + 会话/项目级记忆             | 中         |
 | 澄清与确认     | 已有简单 ask_clarification 触发逻辑   | 更丰富的澄清策略与前端交互             | 中         |
 | 执行与回滚     | 前端一次性 Apply         | 分步执行、校验、失败可回滚或重试       | 中         |
 | 工具与能力     | 无工具，仅靠 prompt     | 读表/统计/校验等工具供 LLM 调用        | 中         |
@@ -130,8 +130,9 @@
 
 ### 5.1 现状
 
-- `call_ollama` / `call_openrouter` 仍为非流式 token 输出，但已通过 `/api/agent-stream` 提供基于 AgentState 的 **SSE 事件流**。
-- SSE 事件类型与动作枚举对齐：`tool_call`、`tool_result`、`plan_done`、`finish`、`clarification`，前端尚未完全接入展示。
+- `call_ollama` / `call_openrouter` 仍为非流式 token 输出；`/api/agent-stream` 通过 LangGraph `astream_events` 推送 **步骤级 SSE**（`tool_call`、`tool_result`、终端事件）。
+- 前端：`agentStream.ts` + `agentProjectPlan.ts` 将流映射为与 sync 相同的 `AgentProjectPlanResult`；`App.tsx` 在 `VITE_AGENT_USE_STREAM=true` 时启用。中间步骤的 UI 展示仍为可选增强。
+- 契约与排序规则：[`agent-stream-sse.md`](agent-stream-sse.md)。
 
 ### 5.2 目标
 
@@ -145,10 +146,8 @@
    - 如需更细粒度的「reasoning / token 级流式」，可在未来引入真正的流式 LLM 输出（当前暂不必做）。
 
 2. **前端**
-   - `client/src/llm.ts`：新增 `requestPlanStream()`（或 `requestAgentStream()`），用 `EventSource` 或 `fetch` + 读 stream，解析 SSE。
-   - `client/src/App.tsx`：在 Cmd+K 面板中增加「进行中」区域：
-     - 显示当前轮次的推理片段、工具调用与结果、最终 plan 的逐步成型；
-     - 可选：折叠/展开「中间步骤」，只保留「最终计划 + Diff」。
+   - ✅ `requestAgentProjectPlanViaStream` / `consumeAgentStream` 已实现；设置 `VITE_AGENT_USE_STREAM=true` 启用。
+   - 可选：在 Cmd+K 面板中实时展示 `tool_call` / `tool_result` 中间步骤（当前仅映射终端结果）。
 
 3. **优先级**：高。流式 + 可观测是 Agent 体验的关键。
 
@@ -158,8 +157,8 @@
 
 ### 6.1 现状
 
-- Agent 接口 `/api/agent` / `/api/agent-stream` 已支持在请求体中携带 `history` 与 `appliedPlansSummary`（`AgentProjectPlanRequest`），后端会在 `initial_state_from_agent_project_request` 中拼进 `AgentState.messages` / `conversation`。
-- 现阶段前端尚未全面利用这些字段构造真正的多轮对话记忆，仅作为基础能力存在。
+- Agent 接口携带 `history`、`appliedPlansSummary`、`previewHistory`；后端在 `initial_state_from_agent_project_request` 写入 `AgentState`。
+- 前端 **`workspaceMemory.ts`** 持久化 `agentTranscript`、`applyLog`、`previewHistory`；`buildAgentHistoryForRequest` 在每次 Agent 调用前组装 `history`。可选服务端同步见 Stage 6（[`agent-memory.md`](agent-memory.md)）。
 
 ### 6.2 目标
 
@@ -173,7 +172,8 @@
    - 后续可考虑在 system 或首条 user 中注入「近期已执行计划」的简短摘要，而不仅仅是保存在 state 内部。
 
 2. **前端**
-   - `App.tsx` 中已有 `conversations` 列表；下一步应在调用 `/api/agent` / `/api/agent-stream` 时，将「上一轮的 (userPrompt, plan, diff)」转为 `history`（user/assistant turns），并把已应用计划摘要写入 `appliedPlansSummary`。
+   - ✅ `workspaceMemory` + `buildAgentHistoryForRequest` 已接入；澄清 Q/A 写入 `agentTranscript`。
+   - 可选：项目级跨设备记忆（依赖 Stage 6 server session store）。
 
 3. **持久化（可选）**
    - 若要做「项目级」记忆：可把 session 或 project 的摘要存 DB/文件，在打开项目时加载，并在每次 Apply 后更新。

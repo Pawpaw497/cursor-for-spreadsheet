@@ -32,6 +32,18 @@ Known issues and common developer pitfalls. For setup see [getting-started.md](.
 | Clarification loop after answering | Reply not wired | Request must include `clarificationReply` + `clarificationTurnId`; see `agentProjectPlan.ts` |
 | `422 empty_response` | PA turn had no plan, tools, or text | Model or upstream issue; grep `[trace=…]` in uvicorn log |
 | `422 plan_validation_failed` | Plan JSON failed `Plan.model_validate` | Invalid step shape; not the same as `structured_plan_missing` |
+| `Error: agent-stream finish: max_turns` | Stream hit turn cap before a plan | Same as sync max-turns; raise `max_turns` on request or simplify prompt; see [`agent-stream-sse.md`](agent-stream-sse.md) |
+| Stream ends with no terminal event | Malformed SSE or connection drop | Browser `agent_stream_fetch_failed` / `agent_stream_done`; backend `stream_agent_events` logs |
+
+---
+
+## Agent preview lifecycle
+
+| Symptom | Likely cause | What to check |
+|---------|--------------|---------------|
+| HTTP 409 `stale_preview` on confirm | Tables changed since preview | Response `staleReason`: `structure` (schema/row count) vs `content` (cell values within row cap). Re-run Generate Plan. See [`agent-preview-lifecycle.md`](agent-preview-lifecycle.md) § Fingerprint |
+| HTTP 429 on revise | `MAX_AGENT_PREVIEW_REVISIONS` (5) exceeded | `previewHistory` / `revisionCount`; start a fresh prompt |
+| Preview never appears | Missing execution tables | Need `projectId` or `previewTables`; without either, agent returns plan-only (no `preview_ready`) |
 
 ---
 
