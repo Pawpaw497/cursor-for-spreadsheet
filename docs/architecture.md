@@ -46,7 +46,7 @@ flowchart LR
 | Single-table plan | `POST /api/plan` | One sheet; LLM returns plan in one shot |
 | Project plan | `POST /api/plan-project` | Multiple tables in request body |
 | Agent (sync) | `POST /api/agent` | Multi-turn tools + optional clarification / preview lifecycle |
-| Agent (SSE) | `POST /api/agent-stream` | Same as agent with streaming events |
+| Agent (SSE) | `POST /api/agent-stream` | Same orchestrator as sync; SSE tool/plan/clarification events — see [agent-stream-sse.md](./agent-stream-sse.md) |
 | Session memory (optional) | `GET/PUT /api/sessions/{sessionId}` | Server backup of `WorkspaceMemory` when `SESSION_MEMORY_DB_ENABLED=1` |
 
 **Single-table UX** often uses `/api/plan` plus **client-side** `applyProjectPlan` for diff preview.
@@ -84,6 +84,8 @@ Entry: `server/main.py` → `uvicorn main:app` (port **8787** default).
 | `workspaceMemory.ts` | Unified workspace thread: chat, agent transcript, apply log, preview history |
 | `sessionMemorySync.ts` | Optional server hydrate / debounced PUT when `sessionMemoryEnabled` |
 | `memoryCompaction.ts` | Client-side middle-out transcript trimming (Stage 5) |
+| `agentStream.ts` | SSE consumer for `/api/agent-stream` |
+| `agentProjectPlan.ts` | Stream → `AgentProjectPlanResult` mapping (sync parity) |
 | `workspaceHistoryStorage.ts` | Technical history (payload/plan/diff) in localStorage |
 | `workspaceRulesStorage.ts` | Per-workspace rules textarea (`localStorage`) |
 
@@ -95,7 +97,7 @@ Dev server: Vite port **5173**.
 2. LangGraph `orchestrator` runs context/intent nodes, then ReAct: `agent_react_step` → `pa_decision_step` (Pydantic AI, `output_type=Plan`, spreadsheet tools via `pa_tools`).
 3. Actions: `call_tool` | `output_plan` | `ask_clarification` | `finish` (and preview-specific actions when enabled). Tool results append via `agent_helpers.run_tool_and_append_messages`.
 4. **Clarification** has two paths: (a) PA `ask_user` tool → `AskClarificationAction` with `source=ask_user`; (b) post-plan deterministic gate `maybe_need_clarification` in `clarification.py` (e.g. multi-table steps missing `table`). Selection context from `request.context` can skip deterministic gates when the grid disambiguates.
-5. Sync `/api/agent` uses the same graph; `/api/agent-stream` mirrors steps as SSE (see [agent-preview-lifecycle.md](./agent-preview-lifecycle.md)).
+5. Sync `/api/agent` and `/api/agent-stream` share the same graph and terminal payloads; the stream emits `tool_call` / `tool_result` steps plus one terminal event (see [agent-stream-sse.md](./agent-stream-sse.md)).
 6. If `previewLifecycle` and execution tables are available, dry-run plan → `PreviewRecord` + compact preview payload.
 
 **Memory:** Client `WorkspaceMemory` is browser-first SSOT; optional server sync via `/api/sessions/{sessionId}` (see [agent-memory.md](./agent-memory.md)). Long threads are compacted before each LLM call (`memory_compaction.py` / `memoryCompaction.ts`).

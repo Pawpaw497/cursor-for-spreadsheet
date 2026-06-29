@@ -24,6 +24,28 @@ Known issues and common developer pitfalls. For setup see [getting-started.md](.
 
 ---
 
+## Preview lifecycle
+
+| Symptom | Likely cause | What to check |
+|---------|--------------|---------------|
+| HTTP 409 `stale_preview` on Confirm | Tables changed after preview | `staleReason`: `structure` (row count / schema) vs `content` (cell values within row cap). Regenerate preview; see [agent-preview-lifecycle.md](./agent-preview-lifecycle.md) § Fingerprint |
+| HTTP 429 on Revise | Revision cap | `MAX_AGENT_PREVIEW_REVISIONS = 5` in `agent_preview.py` |
+| No `preview_ready` | Missing execution tables | Need `projectId` or `previewTables` on the request |
+| Preview tables truncated | Row cap | `PREVIEW_TABLES_MAX_ROWS_PER_TABLE = 5000`; warning in server log |
+
+---
+
+## Agent SSE stream
+
+| Symptom | Likely cause | What to check |
+|---------|--------------|---------------|
+| `agent-stream ended without a terminal event` | Stream closed early | Network/proxy buffering; malformed SSE chunk skipped in `agentStream.ts` |
+| `agent-stream finish: max_turns` | Loop cap hit | `max_turns` on `AgentState` (default from request) |
+| Sync works, stream missing tools | Graph event routing | `stream_agent_events` listens for `llm_decide` / `tool_exec` `on_chain_end`; see [agent-stream-sse.md](./agent-stream-sse.md) |
+| `preview_ready` but UI shows plan only | Client mapping | `mapAgentStreamEventsToResult` prefers `preview_ready` over `plan_done`; ensure `VITE_AGENT_USE_STREAM=true` if testing stream path |
+
+---
+
 ## Agent / clarification
 
 | Symptom | Likely cause | What to check |
