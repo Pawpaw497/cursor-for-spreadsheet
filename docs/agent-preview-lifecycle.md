@@ -76,7 +76,7 @@ Structured logs: `agent_preview_cap_hit` and `agent_preview_revision` (`server/a
 
 ## SSE events
 
-With `previewLifecycle: true`, `/api/agent-stream` may emit `preview_ready` in addition to `tool_call`, `tool_result`, `plan_done`, `clarification`, `finish`.
+With `previewLifecycle: true`, `/api/agent-stream` may emit `preview_ready` (then `plan_done`) in addition to `tool_call`, `tool_result`, `clarification`, `finish`. Event ordering, terminal mapping, and the sync-only preview decision paths are documented in [agent-stream-sse.md](./agent-stream-sse.md).
 
 ## Key request fields (`AgentProjectPlanRequest`)
 

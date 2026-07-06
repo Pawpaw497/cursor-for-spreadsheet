@@ -33,6 +33,16 @@ Known issues and common developer pitfalls. For setup see [getting-started.md](.
 | `422 empty_response` | PA turn had no plan, tools, or text | Model or upstream issue; grep `[trace=…]` in uvicorn log |
 | `422 plan_validation_failed` | Plan JSON failed `Plan.model_validate` | Invalid step shape; not the same as `structured_plan_missing` |
 
+## Agent SSE (`/api/agent-stream`)
+
+| Symptom | Likely cause | What to check |
+|---------|--------------|---------------|
+| `agent-stream finish: max_turns` | Graph hit `max_turns` without a plan | Simplify prompt; check tool loop in logs |
+| `agent-stream ended without a terminal event` | Stream closed mid-flight or parse dropped chunks | Network abort; see `agentStream.ts` parser; [`agent-stream-sse.md`](agent-stream-sse.md) |
+| Preview confirm/abort/revise fails via stream | SSE route has no decision shortcuts | Use sync `POST /api/agent` with `previewDecision` (`App.tsx` already does) |
+| `preview_ready` without following `plan_done` | Client bug or truncated stream | Terminal pair is `preview_ready` then `plan_done`; see ordering tests |
+| Revision cap but no degraded preview | No pending preview and plan not dry-runnable | HTTP 429 on sync `revise`; SSE may emit `finish` with `preview_revision_cap` |
+
 ---
 
 ## Storage / memory
