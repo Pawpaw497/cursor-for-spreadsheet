@@ -32,8 +32,8 @@
 1. **Prerequisites**: Python 3.10+, [uv](https://docs.astral.sh/uv/), Node.js 18+, [Ollama](https://ollama.ai) installed.
 
 ```bash
-git clone https://github.com/Pawpaw497/cursor-for-spreadsheet-mvp.git
-cd cursor-for-spreadsheet-mvp
+git clone https://github.com/Pawpaw497/cursor-for-spreadsheet.git
+cd cursor-for-spreadsheet
 ```
 
 2. **Local model** (keep `ollama serve` running in a terminal):

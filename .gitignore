@@ -375,6 +375,7 @@ out/
 # Visual Studio Code（较 Global 模板更严：不例外保留 .vscode 内文件）
 .vscode/
 *.vsix
+*.code-workspace
 
 # 其他
 *.sublime-project
