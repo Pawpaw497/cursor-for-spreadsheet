@@ -26,7 +26,7 @@ from app.services.projects import ProjectState
 
 log = get_logger("services.agent_preview")
 
-# 与编排层约定一致：超过后拒绝自动修订循环（由路由返回 429）。
+# 与编排层约定一致：超过后优先 degraded preview_ready；无法恢复时 finish 或 429。
 MAX_AGENT_PREVIEW_REVISIONS: int = 5
 
 # ``previewTables`` 全量行硬上限（与前端 ``PREVIEW_TABLES_MAX_ROWS_PER_TABLE`` 对齐），避免反代 body 限制与内存尖峰。
