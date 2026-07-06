@@ -1,6 +1,6 @@
 # Technical documentation
 
-Canonical reference for **spreadsheet-cursor-mvp**, a personal side project under continuous development.
+Canonical reference for **cursor-for-spreadsheet**, a personal side project under continuous development.
 
 ## Language & audience
 

@@ -9,9 +9,8 @@ Thank you for interest in this personal learning project. This repo is **CC BY-N
 3. **Attribution required** — keep a visible notice, for example:
 
    ```
-   Based on "Cursor for Spreadsheet" (cursor-for-spreadsheet-mvp)
-   Original: https://github.com/Pawpaw497/cursor-for-spreadsheet-mvp
-   (Clone directory name may differ from the historical repo slug.)
+   Based on "Cursor for Spreadsheet" (cursor-for-spreadsheet)
+   Original: https://github.com/Pawpaw497/cursor-for-spreadsheet
    License: CC BY-NC 4.0
    ```
 

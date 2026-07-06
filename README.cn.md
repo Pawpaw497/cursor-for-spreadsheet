@@ -32,8 +32,8 @@
 1. **环境**：Python 3.10+、[uv](https://docs.astral.sh/uv/)、Node.js 18+、已安装 [Ollama](https://ollama.ai)。
 
 ```bash
-git clone https://github.com/Pawpaw497/cursor-for-spreadsheet-mvp.git
-cd cursor-for-spreadsheet-mvp
+git clone https://github.com/Pawpaw497/cursor-for-spreadsheet.git
+cd cursor-for-spreadsheet
 ```
 
 2. **本地模型**（保持 `ollama serve` 终端不关）：
