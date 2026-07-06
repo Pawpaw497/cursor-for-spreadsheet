@@ -9,16 +9,17 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from app.agent.actions import FinishAction, OutputPlanAction, PreviewReadyAction, action_kind
+from app.agent.actions import OutputPlanAction, PreviewReadyAction, action_kind
 from app.agent.orchestrator import run_agent_orchestrated, stream_agent_events
 from app.models.agent_models import AgentState, TableContext
 from app.models.plan import Plan
 from app.services.agent_preview import (
     MAX_AGENT_PREVIEW_REVISIONS,
-    PreviewEvaluationCap,
     PreviewEvaluationReady,
     PreviewEvaluationRevise,
+    build_preview_record,
     evaluate_output_plan_preview,
+    fingerprint_execution_tables,
 )
 from app.services.plan_executor import SchemaCol, TableData
 
@@ -103,8 +104,35 @@ def test_evaluate_output_plan_preview_revise_then_ready() -> None:
 def test_evaluate_output_plan_preview_cap_at_revision_limit() -> None:
     agent = _agent_state(revision_count=MAX_AGENT_PREVIEW_REVISIONS)
     result = evaluate_output_plan_preview(agent, _bad_plan(), _tables())
-    assert isinstance(result, PreviewEvaluationCap)
-    assert result.finish_reason.startswith("preview_revision_cap:")
+    assert isinstance(result, PreviewEvaluationReady)
+    assert result.warnings
+    assert any("revision limit" in w.lower() for w in result.warnings)
+    assert result.record.execution_error is not None
+    assert len(result.agent.preview_history) == 1
+
+
+def test_evaluate_output_plan_preview_cap_reuses_pending_preview() -> None:
+    tables = _tables()
+    fp = fingerprint_execution_tables(tables)
+    pending = build_preview_record(
+        plan=_good_plan(),
+        diff={
+            "addedColumns": ["x"],
+            "modifiedColumns": [],
+            "validationWarnings": [],
+            "validationErrors": [],
+        },
+        new_tables=[],
+        tables_fingerprint=fp,
+    )
+    agent = _agent_state(revision_count=MAX_AGENT_PREVIEW_REVISIONS).model_copy(
+        update={"preview_history": [pending]}
+    )
+    result = evaluate_output_plan_preview(agent, _bad_plan(), tables)
+    assert isinstance(result, PreviewEvaluationReady)
+    assert result.record.id == pending.id
+    assert result.warnings
+    assert len(result.agent.preview_history) == 1
 
 
 def test_stream_agent_events_preview_retries_then_ready() -> None:
@@ -147,7 +175,7 @@ def test_stream_agent_events_preview_retries_then_ready() -> None:
     asyncio.run(run())
 
 
-def test_stream_agent_events_preview_cap_finish_reason_stable() -> None:
+def test_stream_agent_events_preview_cap_degraded_ready() -> None:
     async def run() -> None:
         state = _agent_state(revision_count=MAX_AGENT_PREVIEW_REVISIONS)
         tables = _tables()
@@ -168,9 +196,12 @@ def test_stream_agent_events_preview_cap_finish_reason_stable() -> None:
                 chunks.append(chunk)
 
         events = _parse_sse_events(chunks)
-        finishes = [(name, data) for name, data in events if name == "finish"]
-        assert len(finishes) == 1
-        assert finishes[0][1]["reason"].startswith("preview_revision_cap:")
+        event_names = [name for name, _ in events]
+        assert "preview_ready" in event_names
+        preview_events = [data for name, data in events if name == "preview_ready"]
+        assert preview_events[0].get("warnings")
+        finishes = [name for name, _ in events if name == "finish"]
+        assert not finishes
 
     asyncio.run(run())
 
@@ -235,6 +266,43 @@ def test_run_agent_orchestrated_calls_pa_decision_step() -> None:
         assert action_kind(action) == "preview_ready"
         assert pa_calls == 2
         assert m_pa.await_count == 2
+        assert len(final_agent.preview_history) == 1
+
+    asyncio.run(run())
+
+
+def test_run_agent_orchestrated_preview_cap_degraded_ready() -> None:
+    state = _agent_state(revision_count=MAX_AGENT_PREVIEW_REVISIONS)
+    tables = _tables()
+    compiled = AsyncMock()
+
+    async def fake_ainvoke(init):
+        agent_dump = init["agent"]
+        return {
+            "agent": agent_dump,
+            "scratch": {
+                "ser_action": {
+                    "kind": "output_plan",
+                    "plan": _bad_plan().model_dump(),
+                }
+            },
+        }
+
+    compiled.ainvoke = fake_ainvoke
+
+    async def run() -> None:
+        with patch(
+            "app.agent.orchestrator.get_compiled_agent_graph",
+            return_value=compiled,
+        ):
+            final_agent, action = await run_agent_orchestrated(
+                state,
+                preview_lifecycle=True,
+                execution_tables=tables,
+            )
+        assert action_kind(action) == "preview_ready"
+        assert isinstance(action, PreviewReadyAction)
+        assert action.payload.warnings
         assert len(final_agent.preview_history) == 1
 
     asyncio.run(run())

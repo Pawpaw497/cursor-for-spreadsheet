@@ -64,7 +64,15 @@ On **confirm**, if the committed tables’ fingerprint differs, the API returns 
 
 ## Revision limit
 
-`MAX_AGENT_PREVIEW_REVISIONS = 5` (`server/app/services/agent_preview.py`). Exceeding auto-revise loops returns HTTP 429 from the agent route.
+`MAX_AGENT_PREVIEW_REVISIONS = 5` (`server/app/services/agent_preview.py`).
+
+When the cap is reached, the server prefers a **degraded** `preview_ready` (sync and SSE) with `warnings` so the user can still **confirm**, **abort**, or rephrase:
+
+- **Degraded `preview_ready`**: pending preview exists, or the current plan can be dry-run into a new preview record.
+- **HTTP 429**: user `previewDecision: revise` at cap with **no** pending preview (`reason: preview_revision_cap`).
+- **`finish`**: auto-revise at cap when no degraded preview can be constructed.
+
+Structured logs: `agent_preview_cap_hit` and `agent_preview_revision` (`server/app/agent/preview_telemetry.py`).
 
 ## SSE events
 

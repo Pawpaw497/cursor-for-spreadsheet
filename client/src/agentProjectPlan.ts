@@ -32,12 +32,14 @@ export function mapAgentStreamEventsToResult(
   if (previewEv) {
     const d = previewEv.data;
     const histRaw = (d.previewHistory as Record<string, unknown>[] | undefined) ?? [];
+    const warningsRaw = d.warnings as string[] | undefined;
     return {
       kind: "preview_ready",
       plan: parsePlanFromWire(d.plan as Record<string, unknown>),
       preview: parseAgentPreviewRecord(d.preview as Record<string, unknown>),
       previewHistory: histRaw.map((r) => parseAgentPreviewRecord(r)),
-      state: (d.state as Record<string, unknown>) ?? {}
+      state: (d.state as Record<string, unknown>) ?? {},
+      warnings: warningsRaw?.length ? warningsRaw : undefined
     };
   }
 

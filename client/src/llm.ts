@@ -628,6 +628,7 @@ export type AgentProjectPlanResult =
       preview: PreviewRecord;
       previewHistory: PreviewRecord[];
       state: Record<string, unknown>;
+      warnings?: string[];
     }
   | {
       kind: "committed";
@@ -772,12 +773,14 @@ export async function requestAgentProjectPlan(
   if (kind === "preview_ready") {
     const previewRaw = data.preview as Record<string, unknown>;
     const histRaw = (data.previewHistory as Record<string, unknown>[] | undefined) ?? [];
+    const warningsRaw = data.warnings as string[] | undefined;
     return {
       kind: "preview_ready",
       plan: PlanSchema.parse(data.plan as Record<string, unknown>),
       preview: parseAgentPreviewRecord(previewRaw),
       previewHistory: histRaw.map((r) => parseAgentPreviewRecord(r)),
-      state: (data.state as Record<string, unknown>) ?? {}
+      state: (data.state as Record<string, unknown>) ?? {},
+      warnings: warningsRaw?.length ? warningsRaw : undefined
     };
   }
   if (kind === "committed") {

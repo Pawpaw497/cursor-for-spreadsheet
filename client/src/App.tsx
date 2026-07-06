@@ -252,6 +252,13 @@ function schemaToColDefs(
   return [ROW_NUM_COL, ...dataCols];
 }
 
+function previewReadyStatusMessage(warnings?: string[]): string {
+  const base =
+    "服务器预览已就绪：Apply 写回、Abort 放弃预览，或输入修订说明后点 Revise。";
+  if (!warnings?.length) return base;
+  return `${base} （已达修订上限：${warnings.join(" ")}）`;
+}
+
 export default function App() {
   const clone = <T,>(v: T): T => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1226,7 +1233,7 @@ export default function App() {
           mode: "agent_clarification_resolved_preview"
         });
         appendChatMessagesFromPlan(resumePrompt, nextPlan);
-        setStatus("服务器预览已就绪：Apply 写回、Abort 放弃预览，或输入修订说明后点 Revise。");
+        setStatus(previewReadyStatusMessage(agentRes.warnings));
         return;
       }
 
@@ -1394,7 +1401,7 @@ export default function App() {
             };
             return [entry, ...prev];
           });
-          setStatus("服务器预览已就绪：Apply 写回、Abort 放弃预览，或输入修订说明后点 Revise。");
+          setStatus(previewReadyStatusMessage(agentRes.warnings));
           return;
         }
         setStatus("Unexpected agent response.");
@@ -1659,7 +1666,11 @@ export default function App() {
         const rc = Number(st.revision_count ?? st.revisionCount ?? 0);
         setAgentRevisionCount(Number.isFinite(rc) ? rc : 0);
         appendChatMessagesFromPlan(extra, agentRes.plan);
-        setStatus("已根据修订生成新的服务器预览。");
+        setStatus(
+          agentRes.warnings?.length
+            ? previewReadyStatusMessage(agentRes.warnings)
+            : "已根据修订生成新的服务器预览。"
+        );
         logInfo("preview_revise", { traceId });
         return;
       }

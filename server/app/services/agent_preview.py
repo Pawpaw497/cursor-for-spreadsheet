@@ -12,6 +12,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any, Dict, List, Literal, Mapping, Optional, Union
 
+from app.agent.preview_telemetry import log_preview_cap_hit, log_preview_revision
 from app.logging_config import get_logger
 from app.models.agent_models import AgentState, PreviewRecord
 from app.models.plan import AgentProjectPlanRequest, ExecuteTable, Plan, plan_to_wire_dict
@@ -25,7 +26,7 @@ from app.services.projects import ProjectState
 
 log = get_logger("services.agent_preview")
 
-# 与编排层约定一致：超过后拒绝自动修订循环（由路由返回 429）。
+# 与编排层约定一致：超过后优先 degraded preview_ready；无法恢复时 finish 或 429。
 MAX_AGENT_PREVIEW_REVISIONS: int = 5
 
 # ``previewTables`` 全量行硬上限（与前端 ``PREVIEW_TABLES_MAX_ROWS_PER_TABLE`` 对齐），避免反代 body 限制与内存尖峰。
@@ -327,6 +328,7 @@ class PreviewEvaluationReady:
     agent: AgentState
     plan: Plan
     record: PreviewRecord
+    warnings: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -351,6 +353,124 @@ PreviewEvaluation = Union[
 ]
 
 
+def last_pending_preview(history: List[PreviewRecord]) -> Optional[PreviewRecord]:
+    """Return the most recent ``pending`` preview record, if any."""
+    for rec in reversed(history):
+        if rec.status == "pending":
+            return rec
+    return None
+
+
+def _cap_warning_messages(cap_detail: str) -> tuple[str, ...]:
+    return (
+        f"Preview revision limit ({MAX_AGENT_PREVIEW_REVISIONS}) reached.",
+        f"Last failure: {cap_detail}",
+        "You may confirm this preview, abort, or rephrase your request.",
+    )
+
+
+def _empty_diff() -> Dict[str, List[str]]:
+    return {
+        "addedColumns": [],
+        "modifiedColumns": [],
+        "validationWarnings": [],
+        "validationErrors": [],
+    }
+
+
+def resolve_preview_cap_degraded_ready(
+    agent: AgentState,
+    plan: Plan,
+    execution_tables: Mapping[str, TableData],
+    *,
+    cap_detail: str,
+    precomputed_diff: Optional[Dict[str, List[str]]] = None,
+    precomputed_new_tabs: Optional[List[str]] = None,
+    source: str = "auto_revise",
+) -> Optional[PreviewEvaluationReady]:
+    """When revision cap is hit, return degraded ``preview_ready`` if possible."""
+    pending = last_pending_preview(agent.preview_history)
+    warnings = _cap_warning_messages(cap_detail)
+
+    if pending is not None:
+        log_preview_cap_hit(
+            revision_count=agent.revision_count,
+            preview_id=pending.id,
+            source=source,
+        )
+        return PreviewEvaluationReady(
+            agent=agent.model_copy(update={"last_execution_error": cap_detail}),
+            plan=Plan.model_validate(pending.plan),
+            record=pending,
+            warnings=warnings,
+        )
+
+    fp = fingerprint_execution_tables(execution_tables)
+    diff = precomputed_diff
+    new_tabs = list(precomputed_new_tabs or [])
+    errs: List[str] = []
+    if diff is None:
+        diff, new_tabs, errs = dry_run_plan_on_tables(execution_tables, plan)
+
+    if diff is None and not errs:
+        log_preview_cap_hit(
+            revision_count=agent.revision_count,
+            preview_id=None,
+            source=source,
+        )
+        return None
+
+    record = build_preview_record(
+        plan=plan,
+        diff=diff or _empty_diff(),
+        new_tables=new_tabs,
+        tables_fingerprint=fp,
+        execution_error=cap_detail,
+    )
+    final_agent = agent.model_copy(
+        update={
+            "preview_history": list(agent.preview_history) + [record],
+            "last_execution_error": cap_detail,
+        }
+    )
+    log_preview_cap_hit(
+        revision_count=agent.revision_count,
+        preview_id=record.id,
+        source=source,
+    )
+    return PreviewEvaluationReady(
+        agent=final_agent,
+        plan=plan,
+        record=record,
+        warnings=warnings,
+    )
+
+
+def _on_cap_hit(
+    agent: AgentState,
+    plan: Plan,
+    execution_tables: Mapping[str, TableData],
+    cap_detail: str,
+    *,
+    precomputed_diff: Optional[Dict[str, List[str]]] = None,
+    precomputed_new_tabs: Optional[List[str]] = None,
+) -> PreviewEvaluation:
+    degraded = resolve_preview_cap_degraded_ready(
+        agent,
+        plan,
+        execution_tables,
+        cap_detail=cap_detail,
+        precomputed_diff=precomputed_diff,
+        precomputed_new_tabs=precomputed_new_tabs,
+    )
+    if degraded is not None:
+        return degraded
+    return PreviewEvaluationCap(
+        agent=agent.model_copy(update={"last_execution_error": cap_detail}),
+        finish_reason=f"preview_revision_cap: {cap_detail}",
+    )
+
+
 def evaluate_output_plan_preview(
     agent: AgentState,
     plan: Plan,
@@ -371,13 +491,15 @@ def evaluate_output_plan_preview(
     if errs:
         err_text = "; ".join(errs)
         if agent.revision_count >= MAX_AGENT_PREVIEW_REVISIONS:
-            return PreviewEvaluationCap(
-                agent=agent.model_copy(update={"last_execution_error": err_text}),
-                finish_reason=f"preview_revision_cap: {err_text}",
-            )
+            return _on_cap_hit(agent, plan, execution_tables, err_text)
         feedback = (
             "Plan execution failed during server-side preview with error(s): "
             f"{err_text}. Reply with corrected JSON plan only."
+        )
+        log_preview_revision(
+            revision_count=agent.revision_count + 1,
+            source="auto_revise",
+            reason_preview=err_text,
         )
         working = agent.model_copy(
             update={
@@ -392,13 +514,22 @@ def evaluate_output_plan_preview(
     if diff is not None and should_auto_revise_after_preview(diff, plan):
         errs_txt = "; ".join(diff.get("validationErrors") or [])
         if agent.revision_count >= MAX_AGENT_PREVIEW_REVISIONS:
-            return PreviewEvaluationCap(
-                agent=agent.model_copy(update={"last_execution_error": errs_txt}),
-                finish_reason=f"preview_revision_cap: {errs_txt}",
+            return _on_cap_hit(
+                agent,
+                plan,
+                execution_tables,
+                errs_txt,
+                precomputed_diff=diff,
+                precomputed_new_tabs=new_tabs,
             )
         feedback = (
             "Preview produced validationErrors with validate_table level=error: "
             f"{errs_txt}. Regenerate the plan as JSON only."
+        )
+        log_preview_revision(
+            revision_count=agent.revision_count + 1,
+            source="auto_revise",
+            reason_preview=errs_txt,
         )
         working = agent.model_copy(
             update={

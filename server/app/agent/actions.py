@@ -80,6 +80,7 @@ class PreviewReadyPayload:
 
     plan: Plan
     preview: PreviewRecord
+    warnings: Optional[List[str]] = None
 
 
 @dataclass

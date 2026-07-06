@@ -244,7 +244,11 @@ async def run_agent_orchestrated(
             return (
                 ready.agent,
                 PreviewReadyAction(
-                    PreviewReadyPayload(plan=ready.plan, preview=ready.record)
+                    PreviewReadyPayload(
+                        plan=ready.plan,
+                        preview=ready.record,
+                        warnings=list(ready.warnings) if ready.warnings else None,
+                    )
                 ),
             )
 
@@ -362,18 +366,18 @@ async def stream_agent_events(
                     return
                 ready = cast(PreviewEvaluationReady, preview_eval)
                 agent_out = ready.agent
-                yield _sse(
-                    "preview_ready",
-                    {
-                        "plan": plan_dump,
-                        "preview": preview_record_to_wire_dict(ready.record),
-                        "previewHistory": [
-                            preview_record_to_wire_dict(h)
-                            for h in agent_out.preview_history
-                        ],
-                        "state": agent_out.to_dict(),
-                    },
-                )
+                preview_payload: dict[str, Any] = {
+                    "plan": plan_dump,
+                    "preview": preview_record_to_wire_dict(ready.record),
+                    "previewHistory": [
+                        preview_record_to_wire_dict(h)
+                        for h in agent_out.preview_history
+                    ],
+                    "state": agent_out.to_dict(),
+                }
+                if ready.warnings:
+                    preview_payload["warnings"] = list(ready.warnings)
+                yield _sse("preview_ready", preview_payload)
             yield _sse(
                 "plan_done",
                 {"plan": plan_dump, "state": agent_out.to_dict()},

@@ -333,6 +333,95 @@ def test_confirm_returns_409_stale_preview_on_content_change(client: TestClient)
     assert detail["staleReason"] == "content"
 
 
+def test_agent_user_revise_cap_returns_degraded_preview_ready(client: TestClient) -> None:
+    """User revise at cap returns preview_ready with warnings instead of HTTP 429."""
+    preview_tables = [_table_a(rows=[{"k": 1}])]
+    exec_tables = {"A": preview_tables[0]}
+    fp_at_preview = fingerprint_execution_tables(exec_tables)
+    rec = build_preview_record(
+        plan=_simple_plan(),
+        diff={
+            "addedColumns": ["x"],
+            "modifiedColumns": [],
+            "validationWarnings": [],
+            "validationErrors": [],
+        },
+        new_tables=[],
+        tables_fingerprint=fp_at_preview,
+    )
+    body = {
+        "prompt": "revise",
+        "tables": [
+            {
+                "name": "A",
+                "schema": [{"key": "k", "type": "number"}],
+                "sampleRows": [{"k": 1}],
+            }
+        ],
+        "history": [],
+        "previewLifecycle": True,
+        "previewDecision": "revise",
+        "previewId": rec.id,
+        "revisionCount": MAX_AGENT_PREVIEW_REVISIONS,
+        "revisionMessage": "try again",
+        "previewHistory": [
+            {
+                "id": rec.id,
+                "plan": rec.plan,
+                "diff": rec.diff,
+                "newTables": rec.new_tables,
+                "status": rec.status,
+                "tables_fingerprint_at_preview": fp_at_preview,
+                "created_at": rec.created_at,
+            }
+        ],
+        "previewTables": [
+            {
+                "name": "A",
+                "rows": [{"k": 1}],
+                "schema": [{"key": "k", "type": "number"}],
+            }
+        ],
+    }
+    resp = client.post("/api/agent", json=body)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["kind"] == "preview_ready"
+    assert data["preview"]["id"] == rec.id
+    assert data.get("warnings")
+
+
+def test_agent_user_revise_cap_without_pending_returns_429(client: TestClient) -> None:
+    """User revise at cap with no pending preview still returns 429."""
+    body = {
+        "prompt": "revise",
+        "tables": [
+            {
+                "name": "A",
+                "schema": [{"key": "k", "type": "number"}],
+                "sampleRows": [{"k": 1}],
+            }
+        ],
+        "history": [],
+        "previewLifecycle": True,
+        "previewDecision": "revise",
+        "previewId": "preview_missing",
+        "revisionCount": MAX_AGENT_PREVIEW_REVISIONS,
+        "revisionMessage": "try again",
+        "previewHistory": [],
+        "previewTables": [
+            {
+                "name": "A",
+                "rows": [{"k": 1}],
+                "schema": [{"key": "k", "type": "number"}],
+            }
+        ],
+    }
+    resp = client.post("/api/agent", json=body)
+    assert resp.status_code == 429
+    assert resp.json()["detail"]["reason"] == "preview_revision_cap"
+
+
 def test_agent_endpoint_accepts_preview_lifecycle_payload(client: TestClient) -> None:
     """开启 previewLifecycle 时请求体可被解析；若 LLM 不可用则跳过。"""
     body = {
