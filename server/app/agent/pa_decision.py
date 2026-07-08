@@ -5,6 +5,7 @@ Structured ``Plan`` output uses pydantic-ai ``output_type=Plan`` (``final_result
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from dataclasses import dataclass
@@ -12,6 +13,7 @@ from typing import Any
 
 from pydantic_ai import Agent
 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
+from pydantic_ai.settings import ModelSettings
 
 from app.agent.actions import (
     AgentAction,
@@ -43,11 +45,14 @@ from app.config import settings
 from app.logging_config import get_logger
 from app.models.plan import Plan
 from app.services.audit_log import schedule_record_llm_call
+from app.services.llm import OPENROUTER_HTTP_TIMEOUT_TOOLS_S
 from app.services.llm_debug_log import build_error_payload, build_result_payload
 from app.services.llm_pydantic_ai import create_pa_agent, resolve_pa_model
 from app.services.prompts import Message, ProjectPrompt, SpreadsheetPrompt, extract_json
 
 log = get_logger("agent.pa_decision")
+
+_PA_TURN_TIMEOUT_S = OPENROUTER_HTTP_TIMEOUT_TOOLS_S + 60.0  # 90s HTTP + 60s buffer
 
 
 @dataclass(frozen=True, slots=True)
@@ -186,6 +191,7 @@ async def _run_pa_single_turn(
         user_prompt,
         message_history=message_history or None,
         deps=deps,
+        model_settings=ModelSettings(timeout=OPENROUTER_HTTP_TIMEOUT_TOOLS_S),
     ) as run:
         async for node in run:
             if Agent.is_call_tools_node(node):
@@ -358,13 +364,14 @@ async def pa_decision_step(
     t0 = time.perf_counter()
 
     try:
-        turn = await _run_pa_single_turn(
-            agent,
-            user_prompt=user_prompt,
-            message_history=history,
-            deps=deps,
-        )
-    except (ValueError, RuntimeError) as e:
+        async with asyncio.timeout(_PA_TURN_TIMEOUT_S):
+            turn = await _run_pa_single_turn(
+                agent,
+                user_prompt=user_prompt,
+                message_history=history,
+                deps=deps,
+            )
+    except (ValueError, RuntimeError, TimeoutError) as e:
         _schedule_pa_turn_audit(
             state=state,
             duration_ms=(time.perf_counter() - t0) * 1000,
