@@ -6,6 +6,7 @@ import json
 from unittest.mock import patch
 
 import pytest
+from pydantic_ai import UnexpectedModelBehavior
 from pydantic_ai.messages import ToolCallPart
 
 from app.agent.actions import (
@@ -283,5 +284,49 @@ def test_pa_decision_tool_append_message_shape() -> None:
             assert state.user_prompt in final_state.messages[0]["content"]
             assert final_state.messages[-2].get("tool_calls") is not None
             assert final_state.messages[-1]["role"] == "tool"
+
+    asyncio.run(run())
+
+
+def test_pa_decision_finish_reason_error_fast_fails() -> None:
+    """finish_reason='error' from upstream must return FinishAction quickly, not hang."""
+    state = _state()
+
+    async def run() -> None:
+        with patch(
+            "app.agent.pa_decision._run_pa_single_turn",
+            side_effect=UnexpectedModelBehavior(
+                "Model returned finish_reason='error' — upstream provider error"
+            ),
+        ):
+            _, action = await pa_decision_step(state, use_tools=True)
+        assert isinstance(action, FinishAction)
+        assert action.payload is not None
+        assert action.payload.reason.startswith("llm_error:")
+
+    asyncio.run(run())
+
+
+def test_pa_decision_timeout_returns_finish_action() -> None:
+    """asyncio.timeout guard must convert a hung turn into a FinishAction."""
+    state = _state()
+
+    async def _hang(*_args: object, **_kwargs: object) -> PaTurnResult:
+        await asyncio.sleep(9999)
+        return PaTurnResult([], "", None)
+
+    async def run() -> None:
+        import app.agent.pa_decision as mod
+
+        orig_timeout = mod._PA_TURN_TIMEOUT_S
+        mod._PA_TURN_TIMEOUT_S = 0.05
+        try:
+            with patch("app.agent.pa_decision._run_pa_single_turn", side_effect=_hang):
+                _, action = await pa_decision_step(state, use_tools=True)
+        finally:
+            mod._PA_TURN_TIMEOUT_S = orig_timeout
+        assert isinstance(action, FinishAction)
+        assert action.payload is not None
+        assert action.payload.reason.startswith("llm_error:")
 
     asyncio.run(run())

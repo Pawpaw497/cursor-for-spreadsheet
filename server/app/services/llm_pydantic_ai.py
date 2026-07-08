@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import Any, Literal, TypeVar
 
 import httpx
-from pydantic_ai import Agent
+from pydantic_ai import Agent, UnexpectedModelBehavior
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.ollama import OllamaProvider
 from pydantic_ai.providers.openrouter import OpenRouterProvider
@@ -62,6 +62,17 @@ def _shared_http_client() -> httpx.AsyncClient | None:
     return llm_http.get_shared_llm_http_client()
 
 
+class _SafeOpenAIChatModel(OpenAIChatModel):
+    """OpenAIChatModel that fast-fails on finish_reason='error' instead of retrying."""
+
+    def _map_finish_reason(self, key: Any) -> Any:
+        if key == "error":
+            raise UnexpectedModelBehavior(
+                "Model returned finish_reason='error' — upstream provider error"
+            )
+        return super()._map_finish_reason(key)
+
+
 def build_openrouter_chat_model(
     model: str,
     *,
@@ -79,7 +90,7 @@ def build_openrouter_chat_model(
         app_title=app_title or settings.APP_TITLE,
         http_client=client,
     )
-    return OpenAIChatModel(model, provider=provider)
+    return _SafeOpenAIChatModel(model, provider=provider)
 
 
 def build_ollama_chat_model(
