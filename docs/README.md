@@ -21,6 +21,7 @@ Canonical reference for **cursor-for-spreadsheet**, a presentable personal proje
 | [architecture.md](./architecture.md) | Full-stack | Components, API surface, plan execution paths, observability |
 | [plan-step-types-reference.md](./plan-step-types-reference.md) | LLM / backend / frontend | Plan JSON contract: every `action`, fields, and semantics |
 | [agent-preview-lifecycle.md](./agent-preview-lifecycle.md) | Agent / API | Server-side preview, confirm / abort / revise, fingerprints |
+| [agent-stream-sse.md](./agent-stream-sse.md) | Agent / API / frontend | `/api/agent-stream` SSE events, ordering, sync parity, client mapping |
 | [agent-memory.md](./agent-memory.md) | Agent / frontend / backend | Workspace memory schema, prompt injection, compaction, optional server session store |
 | [client-storage.md](./client-storage.md) | Frontend | Browser `localStorage` keys, workspace memory, session sync, privacy |
 | [agent-improvements.md](./agent-improvements.md) | Agent roadmap | Historical upgrade notes; see banner for what is already shipped |
@@ -40,6 +41,7 @@ Canonical reference for **cursor-for-spreadsheet**, a presentable personal proje
 | Plan execution (server) | `server/app/services/plan_executor.py` |
 | LLM prompts / step rules | `server/app/services/prompt_content.py` |
 | Agent orchestration | `server/app/agent/orchestrator.py`, `pa_decision.py`, `pa_tools.py` |
+| Agent SSE stream | `server/app/agent/orchestrator.py` (`stream_agent_events`), `client/src/agentStream.ts`, `agentProjectPlan.ts` |
 | Agent memory / compaction | `server/app/agent/memory_context.py`, `memory_compaction.py`, `context_assembler.py` |
 | Agent preview | `server/app/services/agent_preview.py` |
 | Session memory (optional) | `server/app/api/routes/sessions.py`, `services/session_store.py` |
