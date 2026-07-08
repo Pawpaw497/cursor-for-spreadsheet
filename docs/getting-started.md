@@ -103,14 +103,14 @@ Import Excel/CSV via toolbar; imports time out after ~20 s with a visible messag
 
 | Topic | Doc |
 |-------|-----|
-| MVP features | [features.md](./features.md) |
+| Features | [features.md](./features.md) |
 | Agent clarification | [agent-improvements.md](./agent-improvements.md), `server/app/agent/clarification.py` |
 | Agent preview lifecycle | [agent-preview-lifecycle.md](./agent-preview-lifecycle.md) |
 | Browser storage | [client-storage.md](./client-storage.md) |
 | Agent memory | [agent-memory.md](./agent-memory.md) |
 | Logging & audit | [logging-and-debug.md](./logging-and-debug.md) |
 
-## Security (demo)
+## Security (local-first)
 
 - `add_column` expressions run in the browser via `new Function` — not production-safe.
 - Prompts and table samples may be stored in plaintext locally; do not use sensitive data on shared machines.

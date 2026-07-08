@@ -1,4 +1,5 @@
 # Cursor for Spreadsheet — AI / indexing access control
+# Presentable personal agent project (not MVP / not commercial). See README.md § Project intent.
 # Docs: https://cursor.com/docs/reference/ignore-file
 #
 # Cursor already honors .gitignore and built-in defaults (node_modules/, *.lock,

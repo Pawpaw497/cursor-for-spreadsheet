@@ -1,4 +1,9 @@
 # Indexing-only ignores (files may still be opened or @-mentioned).
 # Docs: https://cursor.com/docs/reference/ignore-file
 #
+# Project (indexed by default): Cursor for Spreadsheet — a presentable, evolvable
+# personal project for applying modern agent technology, strategy, and philosophy
+# to spreadsheet editing (Cmd+K → Plan → Diff → Apply). Not an MVP label or
+# commercial product; see README.md § Project intent.
+#
 # This repo is small; leave empty or add large generated trees here as the project grows.

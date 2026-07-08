@@ -1,8 +1,12 @@
-# Cursor for Spreadsheet — MVP
+# Cursor for Spreadsheet
 
 > 中文版 README · English: [README.md](README.md)
 
-> **TL;DR** — 在浏览器表格里按 **Cmd+K**，用自然语言描述要改什么；**LangGraph Agent 多轮工具调用**（`get_schema` / `get_sample_rows` / `validate_expression`）→ 意图不明时触发澄清轮次 → 结构化 JSON Plan → 前端 **Diff 预览**（列高亮）→ **Apply** 写回并可 **撤销**。支持单表与多表（join / lookup 等）及 SSE 流式响应。个人开源项目，不作生产可用性承诺。
+> **TL;DR** — 在浏览器表格里按 **Cmd+K**，用自然语言描述要改什么；**LangGraph Agent 多轮工具调用**（`get_schema` / `get_sample_rows` / `validate_expression`）→ 意图不明时触发澄清轮次 → 结构化 JSON Plan → 前端 **Diff 预览**（列高亮）→ **Apply** 写回并可 **撤销**。支持单表与多表（join / lookup 等）及 SSE 流式响应。可展示、可演进的个人 Agent 实验项目，非商业产品。
+
+## 项目定位
+
+**可展示、可演进的个人开源项目**，用于在表格编辑场景中实践最新的 **Agent 技术、策略与理念**：多轮工具循环、行动前澄清、结构化 Plan 与预览/撤销、工作区记忆等。代码库面向展示、fork 与持续扩展，而非一次性原型。
 
 > **为什么不直接输出 CSV？** — 结构化 Plan 让每一步可 dry-run、可预览、可撤销；Agent 意图不明时主动触发 Clarification 澄清而非猜测——`Structured Plan + Agent clarification + interpretable Diff + undo` vs `opaque chat-to-CSV`。
 
@@ -10,18 +14,18 @@
 
 ## 项目声明与许可
 
-- **性质**：个人开源项目，非商业产品，不承诺生产可用性与长期维护。
+- **性质**：个人开源项目——在表格场景中持续实践 Agent 技术的可展示沙盒，非商业产品，不承诺生产可用性与长期维护。
 - **二次开发**：欢迎 fork、学习与在此基础上继续开发；使用时须**保留署名并注明来源**（见 [`LICENSE`](LICENSE)）。
 - **许可**：采用 [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/)——允许非商业使用、修改与再分发；**禁止商业使用**（含直接或间接营利、企业内部生产环境商用等），商业合作须另行取得作者书面许可。
-- **安全提示**：Demo 用途；`add_column` 表达式在浏览器内执行（`new Function`），对话与表格上下文可能以明文存于本机；**请勿上传敏感数据或在共享设备上使用**。
+- **安全提示**：本地优先，未做生产级加固；`add_column` 表达式在浏览器内执行（`new Function`），对话与表格上下文可能以明文存于本机；**请勿上传敏感数据或在共享设备上使用**。
 
 ## 项目概述
 
 - **Cmd+K 工作流**：自然语言 + 表 schema / 样本行 → LLM 生成 JSON 计划 → 表格内 Diff 预览 → Apply / 撤销。
 - **单表**（`/api/plan`）与**多表项目**（`/api/plan-project`）：列/行变换、join、lookup、聚合等；前后端共享 Plan 契约。
-- **Agent 模式**（实验性）：`/api/agent`、`/api/agent-stream` — 多轮工具调用，歧义时可先澄清再出 Plan。
+- **Agent 模式**：`/api/agent`、`/api/agent-stream` — 多轮工具调用，歧义时可先澄清再出 Plan。
 - **技术栈**：React 18 + Vite + AG Grid；FastAPI + uv；**LangGraph · Pydantic AI**；OpenRouter / 本地 Ollama 双后端；SQLite 请求与 LLM 调用审计。
-- **阶段目标**：功能详解见 [`docs/features.md`](docs/features.md)；技术索引 [`docs/README.md`](docs/README.md)；英文主 README [`README.md`](README.md)。
+- **文档**：功能详解见 [`docs/features.md`](docs/features.md)；技术索引 [`docs/README.md`](docs/README.md)；英文主 README [`README.md`](README.md)。
 
 ## 快速开始
 
