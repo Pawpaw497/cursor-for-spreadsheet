@@ -91,6 +91,8 @@ cd client && npm ci && npm test
 
 Optional cloud E2E (requires API key; not run in CI): `RUN_CLOUD_LLM_E2E=1 uv run pytest tests/test_cloud_llm_sample_e2e.py -m integration -q` (from `server/`).
 
+Agent quality eval suite (opt-in, calls a real LLM, not run in CI): `uv run python -m evaluation` (from `server/`) — see [`docs/evaluation.md`](docs/evaluation.md).
+
 Logging and SQLite audit: [`docs/logging-and-debug.md`](docs/logging-and-debug.md)
 
 ---

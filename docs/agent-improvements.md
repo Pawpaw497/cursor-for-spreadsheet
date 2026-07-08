@@ -276,6 +276,8 @@
 
 ## 十一、实施顺序建议
 
+> **验收方式**：以下每个阶段落地后，运行一次评估套件（[`docs/evaluation.md`](evaluation.md)，`cd server && uv run python -m evaluation`）并在其「Baseline 记录」追加一行，用真实通过率/耗时证明「变好了、没退步」，而不是仅凭主观判断。涉及澄清场景扩展的项，应同时在 `server/evaluation/cases.py` 补充对应用例。
+
 1. **第零阶段（骨架）** — ✅ **已完成**
    - **AgentState**（`app/agent/state.py`）：tables、messages、applied_plans_summary、current_turn、max_turns 等；`initial_state_from_plan_request` / `from_project_request`。
    - **动作枚举**（`app/agent/actions.py`）：`call_tool` / `output_plan` / `ask_clarification` / `finish` 及 payload（CallToolPayload、Plan、ClarificationPayload、FinishPayload）。
