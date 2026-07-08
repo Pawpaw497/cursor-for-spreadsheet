@@ -387,3 +387,7 @@ out/
 .DS_Store
 .AppleDouble
 .LSOverride
+
+# Claude Code local workspace
+.claude/
+CLAUDE.md
