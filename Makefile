@@ -1,4 +1,4 @@
-.PHONY: dev test test-server test-client
+.PHONY: dev test test-server test-client eval
 
 dev:
 	@echo "Starting backend (8787) and frontend (5173) in background."
@@ -17,3 +17,6 @@ test-server:
 
 test-client:
 	cd client && npm ci && npm test
+
+eval:
+	cd server && uv sync && uv run python -m evaluation

@@ -91,6 +91,8 @@ cd client && npm ci && npm test
 
 可选云端 E2E（需 Key，CI 不跑）：`RUN_CLOUD_LLM_E2E=1 uv run pytest tests/test_cloud_llm_sample_e2e.py -m integration -q`（在 `server/` 下）。
 
+Agent 质量评估套件（可选，真实调用 LLM，CI 不跑）：`uv run python -m evaluation`（在 `server/` 下）——详见 [`docs/evaluation.md`](docs/evaluation.md)。
+
 日志与 SQLite 审计：[`docs/logging-and-debug.md`](docs/logging-and-debug.md)
 
 ---

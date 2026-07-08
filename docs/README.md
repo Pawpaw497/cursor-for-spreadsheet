@@ -24,6 +24,7 @@ Canonical reference for **cursor-for-spreadsheet**, a personal side project unde
 | [agent-memory.md](./agent-memory.md) | Agent / frontend / backend | Workspace memory schema, prompt injection, compaction, optional server session store |
 | [client-storage.md](./client-storage.md) | Frontend | Browser `localStorage` keys, workspace memory, session sync, privacy |
 | [agent-improvements.md](./agent-improvements.md) | Agent roadmap | Historical upgrade notes; see banner for what is already shipped |
+| [evaluation.md](./evaluation.md) | Agent quality | Eval suite (`server/evaluation/`): plan/execution/behavior correctness, gates roadmap changes |
 | [trouble-shoot.md](./trouble-shoot.md) | Developers | Known issues and common pitfalls |
 | [getting-started.md](./getting-started.md) | Setup | Full Quick Start beyond root README |
 | [features.md](./features.md) | Users / devs | MVP features, Agent clarification, preview |
