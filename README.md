@@ -1,8 +1,12 @@
-# Cursor for Spreadsheet — MVP
+# Cursor for Spreadsheet
 
 > English primary README · 中文: [README.cn.md](README.cn.md)
 
-> **TL;DR** — Press **Cmd+K** in the browser spreadsheet, describe what to change in natural language; **LangGraph Agent multi-turn tool calls** (`get_schema` / `get_sample_rows` / `validate_expression`) → clarification when intent is ambiguous → structured JSON **Plan** → **Diff preview** (column highlights) → **Apply** with **undo**. Supports single-table and multi-table flows (join / lookup, etc.) and SSE streaming. Personal open-source project — no production warranty.
+> **TL;DR** — Press **Cmd+K** in the browser spreadsheet, describe what to change in natural language; **LangGraph Agent multi-turn tool calls** (`get_schema` / `get_sample_rows` / `validate_expression`) → clarification when intent is ambiguous → structured JSON **Plan** → **Diff preview** (column highlights) → **Apply** with **undo**. Supports single-table and multi-table flows (join / lookup, etc.) and SSE streaming. A presentable personal project for exploring modern agent patterns — not a commercial product.
+
+## Project intent
+
+A **presentable, evolvable personal project** for applying the latest **agent technology, strategy, and philosophy** to spreadsheet editing: multi-turn tool loops, clarification before action, structured plans with preview/undo, and workspace memory. The codebase is meant to be shown, forked, and extended — not a frozen prototype.
 
 > **Why not output CSV directly?** — Structured Plans make every step dry-runnable, previewable, and undoable; the Agent triggers Clarification instead of guessing when intent is unclear — `Structured Plan + Agent clarification + interpretable Diff + undo` vs `opaque chat-to-CSV`.
 
@@ -10,18 +14,18 @@
 
 ## Project declaration & license
 
-- **Nature**: Personal open-source project, not a commercial product; no production warranty or long-term maintenance commitment.
+- **Nature**: Personal open-source project — a living sandbox for agent techniques on spreadsheets, not a commercial product; no production warranty or long-term maintenance commitment.
 - **Forking**: Forks, learning, and derivative work are welcome; you must **keep attribution and credit the source** (see [`LICENSE`](LICENSE)).
 - **License**: [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/) — non-commercial use, modification, and redistribution allowed; **commercial use prohibited** (including direct/indirect profit or internal production use); commercial licensing requires written permission from the author.
-- **Security**: Demo only; `add_column` expressions run in the browser via `new Function`; chat and spreadsheet context may be stored in plaintext locally — **do not upload sensitive data or use on shared devices**.
+- **Security**: Local-first, not production-hardened; `add_column` expressions run in the browser via `new Function`; chat and spreadsheet context may be stored in plaintext locally — **do not upload sensitive data or use on shared devices**.
 
 ## Overview
 
 - **Cmd+K workflow**: Natural language + table schema / sample rows → LLM generates JSON plan → in-grid Diff preview → Apply / undo.
 - **Single-table** (`/api/plan`) and **multi-table projects** (`/api/plan-project`): column/row transforms, join, lookup, aggregation, etc.; shared Plan contract across frontend and backend.
-- **Agent mode** (experimental): `/api/agent`, `/api/agent-stream` — multi-turn tool calls; clarification before plan generation when ambiguous.
+- **Agent mode**: `/api/agent`, `/api/agent-stream` — multi-turn tool calls; clarification before plan generation when ambiguous.
 - **Stack**: React 18 + Vite + AG Grid; FastAPI + uv; **LangGraph · Pydantic AI**; OpenRouter / local Ollama dual backends; SQLite request and LLM call audit.
-- **Milestones**: feature deep dive [`docs/features.md`](docs/features.md); technical index [`docs/README.md`](docs/README.md); Chinese README [`README.cn.md`](README.cn.md).
+- **Documentation**: feature deep dive [`docs/features.md`](docs/features.md); technical index [`docs/README.md`](docs/README.md); Chinese README [`README.cn.md`](README.cn.md).
 
 ## Quick start
 

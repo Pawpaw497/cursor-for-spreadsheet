@@ -1,6 +1,6 @@
 # Technical documentation
 
-Canonical reference for **cursor-for-spreadsheet**, a personal side project under continuous development.
+Canonical reference for **cursor-for-spreadsheet**, a presentable personal project for applying modern agent architecture to spreadsheet editing — under continuous development, not a frozen prototype.
 
 ## Language & audience
 
@@ -27,7 +27,7 @@ Canonical reference for **cursor-for-spreadsheet**, a personal side project unde
 | [evaluation.md](./evaluation.md) | Agent quality | Eval suite (`server/evaluation/`): plan/execution/behavior correctness, gates roadmap changes |
 | [trouble-shoot.md](./trouble-shoot.md) | Developers | Known issues and common pitfalls |
 | [getting-started.md](./getting-started.md) | Setup | Full Quick Start beyond root README |
-| [features.md](./features.md) | Users / devs | MVP features, Agent clarification, preview |
+| [features.md](./features.md) | Users / devs | Features, Agent clarification, preview |
 | [logging-and-debug.md](./logging-and-debug.md) | Dev / ops | Trace IDs, audit SQLite, LLM debug NDJSON |
 
 ## Source of truth in code

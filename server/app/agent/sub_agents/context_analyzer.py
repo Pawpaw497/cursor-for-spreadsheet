@@ -1,4 +1,4 @@
-"""Context 子代理：MVP 为透传，后续可在此做 schema/统计摘要等增强。"""
+"""Context 子代理：当前为透传，后续可在此做 schema/统计摘要等增强。"""
 
 from app.agent.state import AgentState
 

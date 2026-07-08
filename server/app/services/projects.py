@@ -1,6 +1,6 @@
 """简单的内存版 ProjectStore，用于在后端保存项目内的表状态。
 
-当前实现为进程内字典 + TTL 过期检查，适合作为 Demo / MVP。
+当前实现为进程内字典 + TTL 过期检查，适合本地开发与演示。
 后续可以替换为 Redis / 数据库存储而不影响上层调用方。
 """
 from __future__ import annotations

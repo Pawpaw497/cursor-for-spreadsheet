@@ -1,4 +1,4 @@
-"""Intent 子代理：MVP 为透传，后续可在此归一化意图标签或做槽位。"""
+"""Intent 子代理：当前为透传，后续可在此归一化意图标签或做槽位。"""
 
 from app.agent.state import AgentState
 

@@ -51,7 +51,7 @@
 
 ### 3.1 与 GOAL.md 的对应
 
-- **Phase 3** 要求：MVP、**Agentic Feature**、**agent / tool 调度是否合理**、**人机协作工作流**（而非「更高级的 autocomplete」）。
+- **Phase 3** 要求：**可展示的 Agent 能力**、**Agentic Feature**、**agent / tool 调度是否合理**、**人机协作工作流**（而非「更高级的 autocomplete」）。
 - 下面三项正是「可调度的、有状态的 agent」的实现基础，与 GOAL 的评价标准一致。
 
 ### 3.2 三项骨架与本文档的交叉

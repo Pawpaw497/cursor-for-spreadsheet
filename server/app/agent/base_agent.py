@@ -1,6 +1,6 @@
 """可扩展的 Agent 基类占位（工业级多子图 agent 时在此对接 LangGraph）。
 
-当前主线编排由 `orchestrator.py` 的 StateGraph 完成，本类不再在 MVP 中实例化或调用。
+当前主线编排由 `orchestrator.py` 的 StateGraph 完成，本类不再在主路径中实例化或调用。
 """
 
 from __future__ import annotations

@@ -99,14 +99,14 @@ def _deserialize_terminal_action(ser: dict[str, Any]) -> AgentAction:
 
 
 def _node_context(s: AgentGraphState) -> AgentGraphState:
-    """context_analyzer：MVP 透传。"""
+    """context_analyzer：当前为透传。"""
     agent = AgentState.model_validate(s["agent"])
     out = analyze_context(agent)
     return {"agent": out.model_dump(), "scratch": dict(s.get("scratch") or {})}
 
 
 def _node_intent(s: AgentGraphState) -> AgentGraphState:
-    """intent_analyzer：MVP 透传。"""
+    """intent_analyzer：当前为透传。"""
     agent = AgentState.model_validate(s["agent"])
     out = analyze_intent(agent)
     return {"agent": out.model_dump(), "scratch": dict(s.get("scratch") or {})}

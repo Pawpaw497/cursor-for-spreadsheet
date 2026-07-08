@@ -1,7 +1,7 @@
 [project]
 name = "spreadsheet-cursor-server"
 version = "0.1.0"
-description = "FastAPI backend for Cursor for Spreadsheet MVP."
+description = "FastAPI backend for Cursor for Spreadsheet."
 requires-python = ">=3.10"
 dependencies = [
     "fastapi>=0.115.0",

@@ -1,6 +1,6 @@
 # Architecture overview
 
-Cursor for Spreadsheet is a browser-first MVP: natural language → structured **Plan** JSON → diff preview → apply. The FastAPI backend owns LLM calls and optional server-side plan execution; the React client owns the grid, local preview engine, and most apply paths.
+Cursor for Spreadsheet is a browser-first personal project: natural language → structured **Plan** JSON → diff preview → apply. The FastAPI backend owns LLM calls and optional server-side plan execution; the React client owns the grid, local preview engine, and most apply paths.
 
 ## High-level flow
 
@@ -111,6 +111,6 @@ Tools never mutate submitted project data directly; execution uses copied `Table
 - **Trace ID**: `X-Request-ID` / `[trace=…]` in logs; optional NDJSON under `LLM_DEBUG_LOG_DIR` (see README).
 - **Frontend**: `cmdk_prompt_submit` / `request_error` console events carry `traceId`.
 
-## Intentional non-goals (MVP)
+## Intentional non-goals
 
 Collaborative editing, full formula engine, lineage graph, external data connectors.
