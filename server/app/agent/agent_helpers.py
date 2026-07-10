@@ -19,21 +19,7 @@ __all__ = [
 
 def state_after_turn(state: AgentState) -> AgentState:
     """Return state with ``current_turn`` incremented."""
-    return AgentState(
-        tables=state.tables,
-        messages=state.messages,
-        applied_plans_summary=state.applied_plans_summary,
-        conversation=state.conversation,
-        preview_history=state.preview_history,
-        revision_count=state.revision_count,
-        last_execution_error=state.last_execution_error,
-        current_turn=state.current_turn + 1,
-        max_turns=state.max_turns,
-        user_prompt=state.user_prompt,
-        model_source=state.model_source,
-        cloud_model_id=state.cloud_model_id,
-        local_model_id=state.local_model_id,
-    )
+    return state.model_copy(update={"current_turn": state.current_turn + 1})
 
 
 def state_with_user_feedback(state: AgentState, feedback: str) -> AgentState:
@@ -79,18 +65,9 @@ def run_tool_and_append_messages(
         {"role": "assistant", "content": "", "tool_calls": assistant_tool_calls},
         {"role": "tool", "tool_call_id": tid, "content": result},
     ]
-    return AgentState(
-        tables=state.tables,
-        messages=new_messages,
-        applied_plans_summary=state.applied_plans_summary,
-        conversation=state.conversation,
-        preview_history=state.preview_history,
-        revision_count=state.revision_count,
-        last_execution_error=state.last_execution_error,
-        current_turn=state.current_turn + 1,
-        max_turns=state.max_turns,
-        user_prompt=state.user_prompt,
-        model_source=state.model_source,
-        cloud_model_id=state.cloud_model_id,
-        local_model_id=state.local_model_id,
+    return state.model_copy(
+        update={
+            "messages": new_messages,
+            "current_turn": state.current_turn + 1,
+        }
     )
