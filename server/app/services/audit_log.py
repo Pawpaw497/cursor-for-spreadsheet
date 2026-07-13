@@ -77,6 +77,8 @@ def infer_request_kind(path: str) -> str | None:
         return "agent"
     if p.startswith("/api/sessions"):
         return "session_sync"
+    if p == "/api/data/upload":
+        return "data_upload"
     if "/plan" in p:
         return "plan"
     return None
@@ -319,6 +321,15 @@ def parse_request_body_for_audit(
                 from app.services.session_store import redact_session_body_for_audit
 
                 return redact_session_body_for_audit(parsed)
+            if kind == "data_upload" and isinstance(parsed, dict):
+                schema = parsed.get("schema")
+                rows = parsed.get("rows")
+                return {
+                    "name": parsed.get("name"),
+                    "rowCount": len(rows) if isinstance(rows, list) else 0,
+                    "schemaCols": len(schema) if isinstance(schema, list) else 0,
+                    "_audit": "data_upload_metadata_only",
+                }
             return parsed
         except (UnicodeDecodeError, json.JSONDecodeError):
             return _truncate_text(body_bytes.decode("utf-8", errors="replace"), _max_body_chars())

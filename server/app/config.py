@@ -77,6 +77,12 @@ class Settings:
     ).lower() in ("1", "true", "yes")
     SESSION_MEMORY_TTL_DAYS: int = int(os.getenv("SESSION_MEMORY_TTL_DAYS", "7"))
 
+    # SQLite table row store (upload API + context analyzer)
+    DATA_DB_PATH: str = os.getenv("DATA_DB_PATH", "data/tables.sqlite3")
+    MAX_UPLOAD_ROWS: int = int(os.getenv("MAX_UPLOAD_ROWS", "50000"))
+    MAX_UPLOAD_BYTES: int = int(os.getenv("MAX_UPLOAD_BYTES", str(50 * 1024 * 1024)))
+    TABLE_TTL_HOURS: int = int(os.getenv("TABLE_TTL_HOURS", "24"))
+
     # Agent PA: debug-only — parse assistant text as Plan JSON when structured output missing
     AGENT_PA_PLAN_JSON_FALLBACK: bool = os.getenv(
         "AGENT_PA_PLAN_JSON_FALLBACK", "0"
