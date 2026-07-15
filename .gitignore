@@ -391,3 +391,6 @@ out/
 # Claude Code local workspace
 .claude/
 CLAUDE.md
+
+#backup
+*.bkp
