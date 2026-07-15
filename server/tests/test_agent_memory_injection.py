@@ -11,7 +11,6 @@ def _table() -> TableContext:
     return TableContext(
         name="Sheet1",
         schema=[{"key": "a", "type": "string"}],
-        sample_rows=[{"a": "v"}],
     )
 
 

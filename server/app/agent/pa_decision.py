@@ -256,7 +256,7 @@ async def _finish_from_plan_text(
             t = state.tables[0]
             user_content = (
                 prompt.build_user_content(
-                    state.user_prompt, t.schema, t.sample_rows
+                    state.user_prompt, t.schema, []
                 )
                 + retry_user_suffix
             )
@@ -266,7 +266,7 @@ async def _finish_from_plan_text(
                 {
                     "name": t.name,
                     "schema": t.schema,
-                    "sampleRows": t.sample_rows,
+                    "sampleRows": [],
                 }
                 for t in state.tables
             ]

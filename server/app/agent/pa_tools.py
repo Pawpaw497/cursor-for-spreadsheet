@@ -30,14 +30,6 @@ class GetSchemaArgs(BaseModel):
     )
 
 
-class GetSampleRowsArgs(BaseModel):
-    table_name: str | None = Field(
-        default=None,
-        description="Table name; omit for first table.",
-    )
-    n: int = Field(default=5, description="Number of rows (default 5, max 50).")
-
-
 class GetColumnStatsArgs(BaseModel):
     table_name: str = Field(description="Table name.")
     column: str = Field(description="Column name.")
@@ -100,15 +92,10 @@ PA_TOOL_DEFINITIONS: tuple[PaToolDefinition, ...] = (
         args_model=GetSchemaArgs,
     ),
     PaToolDefinition(
-        name="get_sample_rows",
-        description="Get sample rows from a table to inspect data.",
-        args_model=GetSampleRowsArgs,
-    ),
-    PaToolDefinition(
         name="get_column_stats",
         description=(
             "Get simple stats for a column (count, distinct, min/max if numeric) "
-            "from sample data."
+            "from full table data in the store."
         ),
         args_model=GetColumnStatsArgs,
     ),
@@ -116,8 +103,9 @@ PA_TOOL_DEFINITIONS: tuple[PaToolDefinition, ...] = (
         name="validate_expression",
         description=(
             "Validate a JavaScript-like expression (e.g. for add_column) against "
-            "the first sample row. Arguments must be a JSON object with "
-            '"expression" using exact column keys from schema (not English aliases).'
+            "the first row from store read_rows(table_id, 0, 1). Arguments must be "
+            "a JSON object with \"expression\" using exact column keys from schema "
+            "(not English aliases)."
         ),
         args_model=ValidateExpressionArgs,
     ),
@@ -151,6 +139,10 @@ PA_TOOL_DEFINITIONS: tuple[PaToolDefinition, ...] = (
 
 def tool_names() -> list[str]:
     return [t.name for t in PA_TOOL_DEFINITIONS]
+
+
+def _tool_description(name: str) -> str:
+    return next(t.description for t in PA_TOOL_DEFINITIONS if t.name == name)
 
 
 def _openai_parameters_schema(args_model: type[BaseModel]) -> dict[str, Any]:
@@ -189,7 +181,7 @@ def _run_tool_from_args(
 def register_pa_agent_tools(agent: Agent[PaAgentDeps, Any]) -> None:
     """Register spreadsheet agent tools on a Pydantic AI ``Agent``."""
 
-    @agent.tool(description=PA_TOOL_DEFINITIONS[0].description)
+    @agent.tool(description=_tool_description("get_schema"))
     async def get_schema(
         ctx: RunContext[PaAgentDeps], table_name: str | None = None
     ) -> str:
@@ -197,17 +189,7 @@ def register_pa_agent_tools(agent: Agent[PaAgentDeps, Any]) -> None:
             ctx, "get_schema", GetSchemaArgs(table_name=table_name)
         )
 
-    @agent.tool(description=PA_TOOL_DEFINITIONS[1].description)
-    async def get_sample_rows(
-        ctx: RunContext[PaAgentDeps],
-        table_name: str | None = None,
-        n: int = 5,
-    ) -> str:
-        return _run_tool_from_args(
-            ctx, "get_sample_rows", GetSampleRowsArgs(table_name=table_name, n=n)
-        )
-
-    @agent.tool(description=PA_TOOL_DEFINITIONS[2].description)
+    @agent.tool(description=_tool_description("get_column_stats"))
     async def get_column_stats(
         ctx: RunContext[PaAgentDeps], table_name: str, column: str
     ) -> str:
@@ -217,7 +199,7 @@ def register_pa_agent_tools(agent: Agent[PaAgentDeps, Any]) -> None:
             GetColumnStatsArgs(table_name=table_name, column=column),
         )
 
-    @agent.tool(description=PA_TOOL_DEFINITIONS[3].description)
+    @agent.tool(description=_tool_description("validate_expression"))
     async def validate_expression(
         ctx: RunContext[PaAgentDeps],
         expression: str,
@@ -229,7 +211,7 @@ def register_pa_agent_tools(agent: Agent[PaAgentDeps, Any]) -> None:
             ValidateExpressionArgs(expression=expression, table_name=table_name),
         )
 
-    @agent.tool(description=PA_TOOL_DEFINITIONS[4].description)
+    @agent.tool(description=_tool_description("execute_step"))
     async def execute_step(
         ctx: RunContext[PaAgentDeps],
         step: dict[str, Any],
@@ -241,6 +223,6 @@ def register_pa_agent_tools(agent: Agent[PaAgentDeps, Any]) -> None:
             ExecuteStepArgs(step=step, table_name=table_name),
         )
 
-    @agent.tool(description=PA_TOOL_DEFINITIONS[5].description)
+    @agent.tool(description=_tool_description("rollback_last_step"))
     async def rollback_last_step(ctx: RunContext[PaAgentDeps]) -> str:
         return _run_tool_from_args(ctx, "rollback_last_step", RollbackLastStepArgs())

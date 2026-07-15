@@ -6,22 +6,22 @@ Cursor for Spreadsheet is a browser-first personal project: natural language →
 
 ```mermaid
 flowchart LR
-    subgraph Browser["Browser (React + Vite + AG Grid)"]
-        UI[Cmd+K panel / chat]
-        CTX[Schema + sample rows + optional selection]
-        ENG[engine.ts plan executor]
-        GRID[Grid + diff highlights]
+    subgraph Browser [Browser React Vite AG Grid]
+        UI[Cmd+K panel and chat]
+        CTX[Schema sample rows selection]
+        ENG[engine plan executor]
+        GRID[Grid diff highlights]
     end
 
-    subgraph API["FastAPI (server/)"]
-        PLAN["/api/plan, /api/plan-project"]
-        AGENT["/api/agent, /api/agent-stream"]
-        EXEC["/api/execute-plan, project execute"]
-        SVC[prompts · llm · tools · plan_executor]
+    subgraph API [FastAPI server]
+        PLAN[plan and plan-project API]
+        AGENT[agent and agent-stream API]
+        EXEC[execute-plan API]
+        SVC[prompts llm tools executor]
         ORCH[agent orchestrator]
     end
 
-    subgraph LLM["LLM providers"]
+    subgraph LLM [LLM providers]
         OR[OpenRouter]
         OL[Ollama]
     end
@@ -37,6 +37,20 @@ flowchart LR
     AGENT -->|Plan JSON or preview_ready| ENG
     ENG --> GRID
     EXEC --> SVC
+
+    classDef frontend fill:#e8f5e9,stroke:#2e7d32,color:#1b5e20
+    classDef backend fill:#e3f2fd,stroke:#1565c0,color:#0d47a1
+    classDef llmNode fill:#fff3e0,stroke:#ef6c00,color:#e65100
+    classDef orch fill:#f3e5f5,stroke:#7b1fa2,color:#4a148c
+
+    class UI,CTX,ENG,GRID frontend
+    class PLAN,AGENT,EXEC,SVC backend
+    class OR,OL llmNode
+    class ORCH orch
+
+    style Browser fill:#f1f8e9,stroke:#558b2f,stroke-width:2px
+    style API fill:#e1f5fe,stroke:#0277bd,stroke-width:2px
+    style LLM fill:#fff8e1,stroke:#ff8f00,stroke-width:2px
 ```
 
 ## Planning modes

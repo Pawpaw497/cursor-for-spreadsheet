@@ -22,7 +22,6 @@ def _deps() -> SimpleNamespace:
             TableContext(
                 name="Sheet1",
                 schema=[{"key": "a", "type": "string"}],
-                sample_rows=[],
             )
         ]
     )
@@ -64,6 +63,10 @@ def test_run_tool_from_args_invokes_run_tool() -> None:
     m_run.assert_called_once()
     assert m_run.call_args[0][0] == "get_schema"
     assert m_run.call_args[0][1] == {"table_name": "Sheet1"}
+
+
+def test_tool_names_exclude_get_sample_rows() -> None:
+    assert "get_sample_rows" not in tool_names()
 
 
 def test_get_column_stats_model_requires_fields() -> None:

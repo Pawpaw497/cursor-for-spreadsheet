@@ -11,8 +11,8 @@ def _two_table_state() -> AgentState:
     schema = [{"key": "price", "type": "number"}]
     return AgentState(
         tables=[
-            TableContext(name="Sheet1", schema=schema, sample_rows=[{"price": 1}]),
-            TableContext(name="Sheet2", schema=schema, sample_rows=[{"price": 2}]),
+            TableContext(name="Sheet1", schema=schema),
+            TableContext(name="Sheet2", schema=schema),
         ],
         messages=[],
         user_prompt="lower price",
@@ -77,7 +77,6 @@ def test_no_clarify_single_table() -> None:
             TableContext(
                 name="Only",
                 schema=[{"key": "price", "type": "number"}],
-                sample_rows=[{"price": 1}],
             )
         ],
         messages=[],

@@ -11,7 +11,6 @@ def _table() -> TableContext:
     return TableContext(
         name="Orders",
         schema=[{"key": "id", "type": "string"}, {"key": "amount", "type": "number"}],
-        sample_rows=[{"id": "1", "amount": 10}],
     )
 
 

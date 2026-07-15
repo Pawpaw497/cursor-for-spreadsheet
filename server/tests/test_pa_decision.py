@@ -48,12 +48,11 @@ def _state(*, max_turns: int = 10, tables_count: int = 1) -> AgentState:
         TableContext(
             name="Sheet1",
             schema=[{"key": "a", "type": "string"}],
-            sample_rows=[{"a": "v"}],
         )
     ]
     if tables_count > 1:
         tables.append(
-            TableContext(name="Sheet2", schema=[{"key": "b", "type": "string"}], sample_rows=[])
+            TableContext(name="Sheet2", schema=[{"key": "b", "type": "string"}])
         )
     return AgentState(
         tables=tables,
@@ -240,8 +239,8 @@ def test_pa_decision_clarification_ambiguous_column() -> None:
     schema = [{"key": "price", "type": "number"}]
     state = AgentState(
         tables=[
-            TableContext(name="Sheet1", schema=schema, sample_rows=[{"price": 1}]),
-            TableContext(name="Sheet2", schema=schema, sample_rows=[{"price": 2}]),
+            TableContext(name="Sheet1", schema=schema),
+            TableContext(name="Sheet2", schema=schema),
         ],
         messages=[],
         user_prompt="sort price",

@@ -17,7 +17,6 @@ from app.models.agent_models import AgentState, TableContext
 def _two_table_state() -> AgentState:
     table = {
         "schema": [{"key": "a", "type": "string"}],
-        "sample_rows": [{"a": "x"}],
     }
     return AgentState(
         tables=[

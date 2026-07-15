@@ -677,12 +677,13 @@ export function parsePlanFromWire(raw: Record<string, unknown>): Plan {
 
 /** Shared JSON body for ``/api/agent`` and ``/api/agent-stream``. */
 export function buildAgentProjectPlanRequestBody(
-  opts: AgentProjectPlanRequestOpts
+  opts: AgentProjectPlanRequestOpts,
+  tableRefs: Record<string, string>
 ): Record<string, unknown> {
   const tablesPayload = opts.tables.map((t) => ({
     name: t.name,
     schema: t.schema,
-    sampleRows: t.rows.slice(0, 10)
+    tableRef: tableRefs[t.name]
   }));
   const previewTablesPayload =
     opts.previewTables?.map((t) => ({
@@ -745,10 +746,61 @@ export function buildAgentProjectPlanRequestBody(
   return body;
 }
 
+async function contentHash(t: TableData): Promise<string> {
+  const payload = JSON.stringify({ name: t.name, schema: t.schema, rows: t.rows });
+  const data = new TextEncoder().encode(payload);
+  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(hashBuffer))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+async function uploadTableForAgent(
+  t: TableData,
+  signal?: AbortSignal
+): Promise<string> {
+  const resp = await fetchWithTimeout(
+    `${API_BASE}/api/data/upload`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Client-Request-Id": await contentHash(t)
+      },
+      body: JSON.stringify({ name: t.name, schema: t.schema, rows: t.rows }),
+      signal
+    },
+    TIMEOUT_IMPORT_MS
+  );
+  if (!resp.ok) {
+    throw new Error(errorMessageFromResponse(resp, await resp.text()));
+  }
+  const data = (await resp.json()) as { tableId: string };
+  return data.tableId;
+}
+
+/** 并发上传所有表，返回 name → tableId 映射；两个 transport 共用。 */
+export async function resolveTableRefs(
+  tables: TableData[],
+  signal?: AbortSignal
+): Promise<Record<string, string>> {
+  const refs: Record<string, string> = {};
+  if (tables.length === 0) {
+    return refs;
+  }
+  await Promise.all(
+    tables.map(async (t) => {
+      refs[t.name] = await uploadTableForAgent(t, signal);
+    })
+  );
+  return refs;
+}
+
 export async function requestAgentProjectPlan(
   opts: AgentProjectPlanRequestOpts
 ): Promise<AgentProjectPlanResult> {
-  const body = buildAgentProjectPlanRequestBody(opts);
+  const tableRefs = await resolveTableRefs(opts.tables, opts.signal);
+  const body = buildAgentProjectPlanRequestBody(opts, tableRefs);
   const resp = await fetchWithTimeout(
     `${API_BASE}/api/agent`,
     {
