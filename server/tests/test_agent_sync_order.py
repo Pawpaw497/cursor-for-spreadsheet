@@ -33,7 +33,6 @@ def _agent_state() -> AgentState:
             TableContext(
                 name="Sheet1",
                 schema=[{"key": "a", "type": "string"}],
-                sample_rows=[{"a": "x"}],
             )
         ],
         messages=[],

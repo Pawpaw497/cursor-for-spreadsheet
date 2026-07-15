@@ -217,7 +217,6 @@ def test_pa_turn_writes_llm_log(
             TableContext(
                 name="Sheet1",
                 schema=[{"key": "a", "type": "string"}],
-                sample_rows=[{"a": "v"}],
             )
         ],
         messages=[],

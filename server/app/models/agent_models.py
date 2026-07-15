@@ -6,6 +6,8 @@ from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
+from app.models.table_models import DataContext
+
 PreviewStatus = Literal["pending", "aborted", "committed", "revised"]
 PreviewDecisionKind = Literal["confirm", "abort", "revise"]
 
@@ -32,16 +34,16 @@ class PreviewRecord(BaseModel):
 
 @dataclass
 class TableContext:
-    """单表上下文：供 Agent 读取的表格信息（schema + 样本行）。"""
+    """单表上下文：schema + store 引用（table_id）。"""
 
     name: str
     schema: List[Dict[str, Any]]
-    sample_rows: List[Dict[str, Any]]
+    table_id: Optional[str] = None
 
     @classmethod
     def from_table_info(cls, t: Any) -> "TableContext":
         """由 ``TableInfo`` 构建上下文（duck-typing，避免顶层导入 plan）。"""
-        return cls(name=t.name, schema=t.schema_, sample_rows=t.sampleRows)
+        return cls(name=t.name, schema=t.schema_, table_id=getattr(t, "tableRef", None))
 
 
 class AgentState(BaseModel):
@@ -76,6 +78,7 @@ class AgentState(BaseModel):
     cloud_model_id: Optional[str] = None
     local_model_id: Optional[str] = None
     request_context: Optional[Any] = None
+    data_context: Optional[DataContext] = None
 
     def to_dict(self) -> Dict[str, Any]:
         """便于日志或 SSE 推送的字典表示（不含完整 messages 时可截断）。
@@ -92,6 +95,7 @@ class AgentState(BaseModel):
             "preview_history_count": len(self.preview_history),
             "revision_count": self.revision_count,
             "last_execution_error": self.last_execution_error,
+            "has_data_context": self.data_context is not None,
         }
 
 
@@ -105,7 +109,7 @@ def initial_state_from_plan_request(req: Any) -> AgentState:
         TableContext(
             name="Sheet1",
             schema=req.schema_,
-            sample_rows=req.sampleRows,
+            table_id=None,
         )
     ]
     messages: List[Dict[str, Any]] = []

@@ -28,12 +28,11 @@ def _state(*, tables_count: int = 1) -> AgentState:
         TableContext(
             name="Sheet1",
             schema=[{"key": "a", "type": "string"}],
-            sample_rows=[{"a": "v"}],
         )
     ]
     if tables_count > 1:
         tables.append(
-            TableContext(name="Sheet2", schema=[{"key": "b", "type": "string"}], sample_rows=[])
+            TableContext(name="Sheet2", schema=[{"key": "b", "type": "string"}])
         )
     return AgentState(
         tables=tables,

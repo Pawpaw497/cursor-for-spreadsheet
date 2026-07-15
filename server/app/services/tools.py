@@ -41,26 +41,6 @@ def get_schema(
     return json.dumps(out, ensure_ascii=False, indent=2)
 
 
-@_register("get_sample_rows")
-def get_sample_rows(
-    tables: List[TableContext],
-    table_name: str | None = None,
-    n: int = 5,
-) -> str:
-    """
-    返回指定表或第一张表的前 n 行样本。
-    table_name 为空时取第一张表；n 默认 5。
-    """
-    t = tables[0] if not table_name else next(
-        (x for x in tables if x.name == table_name), None
-    )
-    if not t:
-        return json.dumps({"error": f"Table not found: {table_name!r}"})
-    n = max(0, min(n, 50))
-    rows = t.sample_rows[:n]
-    return json.dumps(rows, ensure_ascii=False, indent=2)
-
-
 @_register("get_column_stats")
 def get_column_stats(
     tables: List[TableContext],
@@ -68,16 +48,20 @@ def get_column_stats(
     column: str,
 ) -> str:
     """
-    基于样本行计算列的简单统计：非空数量、唯一数、最小/最大（若可比较）。
+    基于 store 全量行计算列的简单统计：非空数量、唯一数、最小/最大（若可比较）。
     """
+    from app.services.data_store import TableNotFoundError, get_data_store
+
     t = next((x for x in tables if x.name == table_name), None)
     if not t:
         return json.dumps({"error": f"Table not found: {table_name!r}"})
-    if not t.sample_rows:
+    if not t.table_id:
         return json.dumps({"count": 0, "distinct": 0})
-    values = [
-        r.get(column) for r in t.sample_rows if r.get(column) is not None
-    ]
+    try:
+        rows = get_data_store().read_table(t.table_id).rows
+    except TableNotFoundError:
+        return json.dumps({"error": "Table data not found"})
+    values = [r.get(column) for r in rows if r.get(column) is not None]
     count = len(values)
     distinct = len(set(str(v) for v in values))
     result: Dict[str, Any] = {"count": count, "distinct": distinct}
@@ -98,15 +82,35 @@ def validate_expression(
     table_name: str | None = None,
 ) -> str:
     """
-    用第一行样本在浏览器同构的 (row) => expr 下校验表达式是否可执行。
+    用 store 首行在浏览器同构的 (row) => expr 下校验表达式是否可执行。
     返回 ok 或错误信息。
     """
+    from app.services.data_store import TableNotFoundError, get_data_store
+
     t = tables[0] if not table_name else next(
         (x for x in tables if x.name == table_name), None
     )
-    if not t or not t.sample_rows:
+    if not t:
+        return json.dumps({"ok": False, "error": f"Table not found: {table_name!r}"})
+    if not t.table_id:
+        return json.dumps(
+            {
+                "ok": False,
+                "error": (
+                    f"No tableRef for table {t.name!r}; "
+                    "upload rows before agent request"
+                ),
+            }
+        )
+    try:
+        rows = get_data_store().read_rows(t.table_id, 0, 1)
+    except TableNotFoundError:
+        return json.dumps(
+            {"ok": False, "error": f"Table not found in store: {t.table_id}"}
+        )
+    if not rows:
         return json.dumps({"ok": False, "error": "No sample row"})
-    row = t.sample_rows[0]
+    row = rows[0]
     try:
         # 与前端 engine 一致： (row) => expression
         fn = eval(f"lambda row: ({expression})", _safe_globals(), {})

@@ -105,7 +105,6 @@ def test_map_agent_result_preview_ready_wire_aliases() -> None:
             TableContext(
                 name="销售订单",
                 schema=[{"key": "a", "type": "string"}],
-                sample_rows=[],
             )
         ],
         messages=[],
@@ -130,7 +129,6 @@ def test_stream_agent_events_plan_done_wire_aliases() -> None:
                 TableContext(
                     name="Sheet1",
                     schema=[{"key": "a", "type": "string"}],
-                    sample_rows=[{"a": "x"}],
                 )
             ],
             messages=[],
@@ -171,7 +169,6 @@ def test_stream_agent_events_preview_ready_wire_aliases() -> None:
                 TableContext(
                     name="Sheet1",
                     schema=[{"key": "a", "type": "string"}],
-                    sample_rows=[{"a": "x"}],
                 )
             ],
             messages=[],

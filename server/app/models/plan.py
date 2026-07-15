@@ -241,7 +241,8 @@ class TableInfo(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
     name: str
     schema_: List[Dict[str, Any]] = Field(alias="schema")
-    sampleRows: List[Dict[str, Any]]
+    sampleRows: List[Dict[str, Any]] = Field(default_factory=list)
+    tableRef: Optional[str] = None
 
 
 class PlanRequest(BaseModel):

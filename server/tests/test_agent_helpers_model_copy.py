@@ -14,7 +14,6 @@ def _state_with_request_context() -> AgentState:
             TableContext(
                 name="Sheet1",
                 schema=[{"key": "a", "type": "string"}],
-                sample_rows=[{"a": "x"}],
             )
         ],
         messages=[{"role": "user", "content": "hello"}],

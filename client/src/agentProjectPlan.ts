@@ -7,6 +7,7 @@ import {
   buildAgentProjectPlanRequestBody,
   parseAgentPreviewRecord,
   parsePlanFromWire,
+  resolveTableRefs,
   type AgentProjectPlanRequestOpts,
   type AgentProjectPlanResult
 } from "./llm";
@@ -63,7 +64,8 @@ export function mapAgentStreamEventsToResult(
 export async function requestAgentProjectPlanViaStream(
   opts: AgentProjectPlanRequestOpts
 ): Promise<AgentProjectPlanResult> {
-  const body = buildAgentProjectPlanRequestBody(opts);
+  const tableRefs = await resolveTableRefs(opts.tables, opts.signal);
+  const body = buildAgentProjectPlanRequestBody(opts, tableRefs);
   const events = await consumeAgentStream({
     body,
     traceId: opts.traceId,

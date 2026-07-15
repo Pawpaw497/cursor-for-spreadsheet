@@ -155,7 +155,7 @@ def test_protected_table_and_selection_messages_kept_in_tool_loop() -> None:
 
 
 def test_apply_message_compaction_on_state_with_tools() -> None:
-    table = TableContext(name="Sheet1", schema=[], sample_rows=[])
+    table = TableContext(name="Sheet1", schema=[], table_id=None)
     msgs: list[dict] = [
         {"role": "user", "content": "Spreadsheet schema:\n[]\n\nUser request:\nx\n"},
     ]

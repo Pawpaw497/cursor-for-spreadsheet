@@ -25,7 +25,6 @@ def _table() -> TableContext:
     return TableContext(
         name="Sheet1",
         schema=[{"key": "a", "type": "string"}],
-        sample_rows=[{"a": "v"}],
     )
 
 
@@ -40,7 +39,7 @@ def test_agent_to_graph_roundtrip() -> None:
 def test_system_instructions_single_vs_project() -> None:
     single = AgentState(tables=[_table()], messages=[], user_prompt="x")
     multi = AgentState(
-        tables=[_table(), TableContext(name="T2", schema=[], sample_rows=[])],
+        tables=[_table(), TableContext(name="T2", schema=[])],
         messages=[],
         user_prompt="x",
     )

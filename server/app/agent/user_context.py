@@ -16,12 +16,12 @@ def build_initial_user_message_from_tables(
         prompt = SpreadsheetPrompt()
         t = tables[0]
         user_content = prompt.build_user_content(
-            user_prompt, t.schema, t.sample_rows
+            user_prompt, t.schema, []
         )
     else:
         prompt = ProjectPrompt()
         tables_data = [
-            {"name": t.name, "schema": t.schema, "sampleRows": t.sample_rows}
+            {"name": t.name, "schema": t.schema, "sampleRows": []}
             for t in tables
         ]
         user_content = prompt.build_user_content(user_prompt, tables_data)
