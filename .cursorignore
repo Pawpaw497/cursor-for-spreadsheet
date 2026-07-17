@@ -42,4 +42,6 @@ test-data/*.xlsx
 llm-debug/
 logs/llm/
 
-# Keep .cursor/rules, skills, and plans visible to Agent (do not ignore .cursor/)
+# Re-include gitignored `.cursor/` for indexing and Agent (rules, plans, skills)
+!.cursor/
+!.cursor/**
