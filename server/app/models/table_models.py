@@ -14,6 +14,7 @@ class ColumnProfile(BaseModel):
     null_count: int
     null_ratio: float
     distinct_count: int
+    off_type_count: int = 0
     min_val: Optional[str] = None
     max_val: Optional[str] = None
     mean: Optional[float] = None
@@ -26,6 +27,7 @@ class TableProfile(BaseModel):
     total_row_count: int
     col_count: int
     columns: list[ColumnProfile] = Field(default_factory=list)
+    profile_sampled: bool = False
     topic: Optional[str] = None
     description: Optional[str] = None
     granularity: Optional[str] = None

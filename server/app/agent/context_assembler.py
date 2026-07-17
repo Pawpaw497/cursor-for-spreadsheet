@@ -8,6 +8,21 @@ from pydantic import BaseModel, Field
 from app.agent.memory_context import build_memory_context_block
 from app.models.agent_models import AgentState, TableContext
 from app.models.plan import AgentRequestContext
+from app.models.table_models import ColumnProfile, DataContext
+
+# Data profile 消息的身份前缀：renderer 输出以它开头，判别/去重/compaction 保护
+# 一律经 is_data_profile_message 识别（禁止在调用方硬编码该字符串）。
+DATA_PROFILE_PREFIX = "Data profile:\n"
+
+
+def is_data_profile_message(msg: dict[str, Any]) -> bool:
+    """Data profile 消息判别：去重与 compaction 保护（Stage 4）均走本函数。
+
+    与常量同文件定义，memory_compaction / context_analyzer 均可 import 而不成环。
+    """
+    if msg.get("role") != "user":
+        return False
+    return str(msg.get("content") or "").startswith(DATA_PROFILE_PREFIX)
 
 
 class AgentContextPackage(BaseModel):
@@ -78,6 +93,46 @@ def build_selection_context_text(ctx: AgentRequestContext | None) -> str | None:
     if not parts:
         return None
     return "\n\n".join(parts)
+
+
+def _format_number(x: float) -> str:
+    if float(x).is_integer():
+        return str(int(x))
+    return f"{x:.2f}".rstrip("0").rstrip(".")
+
+
+def _render_column_line(col: ColumnProfile) -> str:
+    head = f"- {col.name}: {col.inferred_type}"
+    if col.off_type_count:
+        head += f" ({col.off_type_count} off-type values)"
+    parts = [head]
+    parts.append(f"{col.null_ratio:.0%} null")
+    parts.append(f"{col.distinct_count} distinct")
+    if col.min_val is not None and col.max_val is not None:
+        parts.append(f"range {col.min_val}–{col.max_val}")
+    if col.mean is not None:
+        parts.append(f"mean {_format_number(col.mean)}")
+    if col.std is not None:
+        parts.append(f"std {_format_number(col.std)}")
+    if col.top_values:
+        tv = ", ".join(f"{v} ({n})" for v, n in col.top_values)
+        parts.append(f"top: {tv}")
+    return ", ".join(parts)
+
+
+def build_data_context_text(dc: DataContext | None) -> str:
+    """DataContext → 紧凑 prompt 文本；空则返回空串（调用方据此跳过注入）。"""
+    if dc is None or not dc.tables:
+        return ""
+    blocks: list[str] = []
+    for t in dc.tables:
+        header = f'Table "{t.table_name}" ({t.total_row_count} rows, {t.col_count} columns)'
+        if t.profile_sampled:
+            header += " (distinct/top values sampled)"
+        lines = [header + ":"]
+        lines.extend(_render_column_line(c) for c in t.columns)
+        blocks.append("\n".join(lines))
+    return DATA_PROFILE_PREFIX + "\n\n".join(blocks)
 
 
 def selection_context_user_message(ctx: AgentRequestContext | None) -> dict[str, str] | None:

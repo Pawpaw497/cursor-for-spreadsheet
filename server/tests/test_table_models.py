@@ -17,6 +17,12 @@ def test_column_profile_defaults() -> None:
     assert col.top_values == []
     assert col.min_val is None
     assert col.mean is None
+    assert col.off_type_count == 0
+
+
+def test_table_profile_sampled_defaults_false() -> None:
+    table = TableProfile(table_name="T", total_row_count=0, col_count=0)
+    assert table.profile_sampled is False
 
 
 def test_table_profile_reserved_fields_default_none() -> None:
@@ -77,6 +83,7 @@ def test_agent_state_data_context_roundtrip() -> None:
                             null_count=0,
                             null_ratio=0.0,
                             distinct_count=2,
+                            off_type_count=1,
                             top_values=[("active", 1), ("done", 1)],
                         )
                     ],
@@ -89,3 +96,4 @@ def test_agent_state_data_context_roundtrip() -> None:
     assert restored.data_context is not None
     col = restored.data_context.tables[0].columns[0]
     assert col.top_values == [("active", 1), ("done", 1)]
+    assert col.off_type_count == 1
