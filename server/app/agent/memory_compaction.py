@@ -3,10 +3,21 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.agent.message_discriminators import (
+    is_data_profile_message,
+    is_selection_context_message,
+    is_table_context_message,
+)
 from app.models.agent_models import AgentState
+
+# 兼容别名：历史调用方/测试仍引用私有名；实现已移至 message_discriminators。
+_is_table_context_message = is_table_context_message
+_is_selection_context_message = is_selection_context_message
 
 MAX_CHAT_TURNS = 24
 MAX_TOOL_MESSAGES = 12
+# 仅作 fallback：正常路径由 detect_preserve_tail_count 按实际尾链（最多 3 条）决定；
+# 未显式传 preserve_tail_count 的直接调用方拿到 2，保护消息另有 _protected_message_indices 兜底。
 DEFAULT_PRESERVE_TAIL_COUNT = 2
 
 EARLIER_PREFIX = "Earlier in this workspace:\n"
@@ -21,26 +32,14 @@ def _is_tool_related(msg: dict[str, Any]) -> bool:
     return False
 
 
-def _is_table_context_message(msg: dict[str, Any]) -> bool:
-    if msg.get("role") != "user":
-        return False
-    content = str(msg.get("content") or "")
-    return "Spreadsheet schema:" in content or "Project has multiple tables:" in content
-
-
-def _is_selection_context_message(msg: dict[str, Any]) -> bool:
-    if msg.get("role") != "user":
-        return False
-    content = str(msg.get("content") or "")
-    return "Current selection:" in content or "Workspace rules:" in content
-
-
 def _protected_message_indices(messages: list[dict[str, Any]]) -> set[int]:
-    """Selection + table-context user messages are never dropped."""
+    """Selection + table-context + data-profile user messages are never dropped."""
     return {
         i
         for i, m in enumerate(messages)
-        if _is_table_context_message(m) or _is_selection_context_message(m)
+        if is_table_context_message(m)
+        or is_selection_context_message(m)
+        or is_data_profile_message(m)
     }
 
 
@@ -78,14 +77,20 @@ def _build_earlier_summary(
 
 
 def detect_preserve_tail_count(messages: list[dict[str, Any]]) -> int:
-    """Infer how many trailing messages must stay verbatim (selection + table context)."""
-    if not messages:
+    """Infer how many trailing messages must stay verbatim.
+
+    实际尾链顺序为 ``[selection?, data-profile?, table-context]``（context_analyzer
+    把 Data profile 插在 schema 消息之前），末尾必须是 table-context 才计数。
+    """
+    if not messages or not is_table_context_message(messages[-1]):
         return 0
-    count = 0
-    if _is_table_context_message(messages[-1]):
-        count = 1
-        if len(messages) >= 2 and _is_selection_context_message(messages[-2]):
-            count = 2
+    count = 1
+    i = len(messages) - 2
+    if i >= 0 and is_data_profile_message(messages[i]):
+        count += 1
+        i -= 1
+    if i >= 0 and is_selection_context_message(messages[i]):
+        count += 1
     return count
 
 

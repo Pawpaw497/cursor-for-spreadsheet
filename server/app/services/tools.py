@@ -1,11 +1,13 @@
 """Agent 可调用的工具：读表、样本、列统计、校验表达式。"""
 from __future__ import annotations
 
+import inspect
 import json
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from app.agent.state import TableContext
 from app.logging_config import get_logger
+from app.models.table_models import ColumnProfile, DataContext
 from app.services.plan_executor import _safe_globals
 
 log = get_logger("services.tools")
@@ -41,16 +43,54 @@ def get_schema(
     return json.dumps(out, ensure_ascii=False, indent=2)
 
 
+def _column_profile_to_wire_stats(cp: ColumnProfile) -> Dict[str, Any]:
+    """ColumnProfile → 现有工具 wire shape ``{count, distinct, min?, max?}``。
+
+    注意：大表 profile（profile_sampled）的 distinct/极值可能基于采样子集，
+    与 fallback 的全量精确扫描在超大表上可能有差异 — SSOT 上以 profile 口径为准。
+    """
+    result: Dict[str, Any] = {"count": cp.count, "distinct": cp.distinct_count}
+    if cp.inferred_type == "numeric":
+        for key, raw in (("min", cp.min_val), ("max", cp.max_val)):
+            if raw is None:
+                continue
+            try:
+                num = float(raw)
+            except ValueError:
+                continue
+            result[key] = int(num) if num.is_integer() else num
+    return result
+
+
+def _find_column_profile(
+    data_context: Optional[DataContext], table_name: str, column: str
+) -> Optional[ColumnProfile]:
+    if data_context is None:
+        return None
+    tp = next(
+        (x for x in data_context.tables if x.table_name == table_name), None
+    )
+    if tp is None:
+        return None
+    return next((c for c in tp.columns if c.name == column), None)
+
+
 @_register("get_column_stats")
 def get_column_stats(
     tables: List[TableContext],
     table_name: str,
     column: str,
+    data_context: Optional[DataContext] = None,
 ) -> str:
     """
-    基于 store 全量行计算列的简单统计：非空数量、唯一数、最小/最大（若可比较）。
+    列统计（SSOT）：优先读 state.data_context 的 ColumnProfile；
+    未命中时 fallback 到 store 全量行扫描。
     """
     from app.services.data_store import TableNotFoundError, get_data_store
+
+    cp = _find_column_profile(data_context, table_name, column)
+    if cp is not None:
+        return json.dumps(_column_profile_to_wire_stats(cp), ensure_ascii=False)
 
     t = next((x for x in tables if x.name == table_name), None)
     if not t:
@@ -169,8 +209,14 @@ def run_tool(
     tool_name: str,
     tool_args: Dict[str, Any],
     tables: List[TableContext],
+    *,
+    data_context: Optional[DataContext] = None,
 ) -> str:
-    """执行指定工具，返回 JSON 字符串结果。工具不存在或参数错误时返回错误 JSON。"""
+    """执行指定工具，返回 JSON 字符串结果。工具不存在或参数错误时返回错误 JSON。
+
+    条件注入契约（validate-expression-region-aware.plan.md 复用，勿移除）：
+    仅当工具实现声明了 ``data_context`` 形参时才注入，其余工具签名不变。
+    """
     arg_keys = sorted(tool_args.keys()) if tool_args else []
     log.info(
         "run_tool start name=%s arg_keys=%s tables=%d",
@@ -181,8 +227,12 @@ def run_tool(
     if tool_name not in _TOOL_IMPLS:
         log.warning("run_tool unknown_tool name=%s", tool_name)
         return json.dumps({"error": f"Unknown tool: {tool_name!r}"})
+    impl = _TOOL_IMPLS[tool_name]
+    kwargs = dict(tool_args) if tool_args else {}
+    if "data_context" in inspect.signature(impl).parameters:
+        kwargs["data_context"] = data_context
     try:
-        out = _TOOL_IMPLS[tool_name](tables, **tool_args)
+        out = impl(tables, **kwargs)
         log.info(
             "run_tool done name=%s result_len=%d",
             tool_name,

@@ -193,3 +193,30 @@ def test_node_context_graph_roundtrip_preserves_data_context(store) -> None:
     assert restored.data_context is not None
     assert restored.data_context.tables[0].total_row_count == 3
     assert any(is_data_profile_message(m) for m in restored.messages)
+
+
+def test_partial_multi_table_profiles_present_and_summary_warning(
+    store, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Stage 4：A 在 store、B 缺失 → partial DataContext + 单条汇总 warning。"""
+    import logging
+
+    tid_a = store.create_table("A", SCHEMA, ROWS)
+    state = AgentState(
+        tables=[
+            TableContext(name="A", schema=SCHEMA, table_id=tid_a),
+            TableContext(name="B", schema=SCHEMA, table_id="missing-id"),
+        ],
+        messages=[dict(SCHEMA_MSG)],
+        user_prompt="join",
+    )
+    with caplog.at_level(logging.WARNING, logger="app.agent.sub_agents.context_analyzer"):
+        out = analyze_context(state)
+
+    assert out.data_context is not None
+    assert [tp.table_name for tp in out.data_context.tables] == ["A"]
+    summary = [
+        r for r in caplog.records if "partial DataContext" in r.getMessage()
+    ]
+    assert len(summary) == 1
+    assert "B" in summary[0].getMessage()
