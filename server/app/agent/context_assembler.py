@@ -10,19 +10,11 @@ from app.models.agent_models import AgentState, TableContext
 from app.models.plan import AgentRequestContext
 from app.models.table_models import ColumnProfile, DataContext
 
-# Data profile 消息的身份前缀：renderer 输出以它开头，判别/去重/compaction 保护
-# 一律经 is_data_profile_message 识别（禁止在调用方硬编码该字符串）。
-DATA_PROFILE_PREFIX = "Data profile:\n"
-
-
-def is_data_profile_message(msg: dict[str, Any]) -> bool:
-    """Data profile 消息判别：去重与 compaction 保护（Stage 4）均走本函数。
-
-    与常量同文件定义，memory_compaction / context_analyzer 均可 import 而不成环。
-    """
-    if msg.get("role") != "user":
-        return False
-    return str(msg.get("content") or "").startswith(DATA_PROFILE_PREFIX)
+# 兼容 re-export：实现移至 message_discriminators，历史调用方与测试不破坏。
+from app.agent.message_discriminators import (  # noqa: F401
+    DATA_PROFILE_PREFIX,
+    is_data_profile_message,
+)
 
 
 class AgentContextPackage(BaseModel):

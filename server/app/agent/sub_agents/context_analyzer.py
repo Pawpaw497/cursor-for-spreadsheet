@@ -1,7 +1,7 @@
 """Context 子代理：从 store 读全量 rows 计算 DataContext 并注入 Data profile 消息。
 
 注入规则（R1，2026-07-15 定稿）：仅当 ``state.messages`` 中已存在 schema 消息
-（``_is_table_context_message`` 命中）时注入，插入位置为该消息之前、每次重新
+（``is_table_context_message`` 命中）时注入，插入位置为该消息之前、每次重新
 定位；无 schema 消息（legacy 懒构建路径）则跳过注入但照常填 ``data_context``，
 绝不代替消息组装层 materialize schema。重跑时先移除旧 profile 再注入新的。
 """
@@ -10,11 +10,11 @@ from __future__ import annotations
 import logging
 import time
 
-from app.agent.context_assembler import (
-    build_data_context_text,
+from app.agent.context_assembler import build_data_context_text
+from app.agent.message_discriminators import (
     is_data_profile_message,
+    is_table_context_message,
 )
-from app.agent.memory_compaction import _is_table_context_message
 from app.agent.sub_agents.profile_builder import build_table_profile
 from app.models.agent_models import AgentState
 from app.models.table_models import DataContext, TableProfile
@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 
 def _build_profiles(state: AgentState) -> list[TableProfile]:
     profiles: list[TableProfile] = []
+    missing: list[str] = []
     store = get_data_store()
     for t in state.tables:
         if not t.table_id:
@@ -35,11 +36,12 @@ def _build_profiles(state: AgentState) -> list[TableProfile]:
             stored = store.read_table(t.table_id)
             read_ms = (time.perf_counter() - t0) * 1000
         except TableNotFoundError:
-            logger.warning(
+            logger.info(
                 "context_analyzer: table %r (%s) not in store, skip profile",
                 t.name,
                 t.table_id,
             )
+            missing.append(t.name)
             continue
         t1 = time.perf_counter()
         profiles.append(build_table_profile(t.name, t.schema, stored.rows))
@@ -50,6 +52,12 @@ def _build_profiles(state: AgentState) -> list[TableProfile]:
             len(stored.rows),
             read_ms,
             profile_ms,
+        )
+    if missing and profiles:
+        # 部分表缺失但仍产出 partial DataContext：单条汇总，便于排查静默缺列。
+        logger.warning(
+            "context_analyzer: partial DataContext, missing tables: %s",
+            ", ".join(missing),
         )
     return profiles
 
@@ -79,7 +87,7 @@ def analyze_context(state: AgentState) -> AgentState:
 
     messages = [m for m in state.messages if not is_data_profile_message(m)]
     schema_idx = next(
-        (i for i, m in enumerate(messages) if _is_table_context_message(m)), None
+        (i for i, m in enumerate(messages) if is_table_context_message(m)), None
     )
     if schema_idx is None:
         logger.info(

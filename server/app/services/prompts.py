@@ -53,25 +53,24 @@ class SingleTableUserContent(BaseModel):
     model_config = {"populate_by_name": True}
 
     def to_prompt_string(self) -> str:
-        """序列化为 prompt 中的 user 消息正文。"""
+        """序列化为 prompt 中的 user 消息正文。
+
+        Agent 路径传空 sample_rows（统计由 Data profile / DataContext 提供），
+        只渲染 schema + user request；legacy `/api/plan` 传非空样本时保留
+        原 sample dump + stats，随 Stage 5 退役。
+        """
         schema_str = json.dumps(self.schema_, ensure_ascii=False, indent=2)
-        rows_str = json.dumps(self.sample_rows, ensure_ascii=False, indent=2)
-        col_keys: List[str] = []
-        for c in self.schema_:
-            if isinstance(c, dict) and c.get("key"):
-                col_keys.append(str(c["key"]))
-        stats = build_column_stats_text(
-            self.sample_rows, col_keys or None
-        )
-        return (
-            "Spreadsheet schema:\n"
-            f"{schema_str}\n\n"
-            "Sample rows:\n"
-            f"{rows_str}\n\n"
-            f"{stats}"
-            "User request:\n"
-            f"{self.user_prompt}\n"
-        )
+        parts = ["Spreadsheet schema:\n", f"{schema_str}\n\n"]
+        if self.sample_rows:
+            rows_str = json.dumps(self.sample_rows, ensure_ascii=False, indent=2)
+            col_keys: List[str] = []
+            for c in self.schema_:
+                if isinstance(c, dict) and c.get("key"):
+                    col_keys.append(str(c["key"]))
+            stats = build_column_stats_text(self.sample_rows, col_keys or None)
+            parts.extend(["Sample rows:\n", f"{rows_str}\n\n", stats])
+        parts.extend(["User request:\n", f"{self.user_prompt}\n"])
+        return "".join(parts)
 
 
 class TableBlock(BaseModel):
@@ -96,20 +95,22 @@ class ProjectUserContent(BaseModel):
         parts = ["Project has multiple tables:\n"]
         for t in self.tables:
             schema_str = json.dumps(t.schema_, ensure_ascii=False, indent=2)
-            rows_str = json.dumps(t.sample_rows, ensure_ascii=False, indent=2)
-            col_keys: List[str] = []
-            for c in t.schema_:
-                if isinstance(c, dict) and c.get("key"):
-                    col_keys.append(str(c["key"]))
-            stats = build_column_stats_text(
-                t.sample_rows, col_keys or None
-            )
             parts.append(f"Table '{t.name}':")
             parts.append(f"  schema: {schema_str}")
-            parts.append(f"  sample rows: {rows_str}\n")
-            if stats:
-                for line in stats.rstrip("\n").split("\n"):
-                    parts.append(f"  {line}\n")
+            # Agent 路径 sample_rows 为空（统计走 Data profile）；legacy 路径保留原样。
+            if not t.sample_rows:
+                parts.append("\n")
+            else:
+                rows_str = json.dumps(t.sample_rows, ensure_ascii=False, indent=2)
+                col_keys: List[str] = []
+                for c in t.schema_:
+                    if isinstance(c, dict) and c.get("key"):
+                        col_keys.append(str(c["key"]))
+                stats = build_column_stats_text(t.sample_rows, col_keys or None)
+                parts.append(f"  sample rows: {rows_str}\n")
+                if stats:
+                    for line in stats.rstrip("\n").split("\n"):
+                        parts.append(f"  {line}\n")
         parts.append(f"User request:\n{self.user_prompt}\n")
         return "".join(parts)
 

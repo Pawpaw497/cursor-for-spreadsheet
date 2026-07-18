@@ -110,6 +110,50 @@ def test_compact_tool_messages_keeps_last_n_and_digests() -> None:
     assert result[-1]["tool_call_id"] == tid
 
 
+def test_detect_tail_chain_one_two_three() -> None:
+    from app.agent.memory_compaction import detect_preserve_tail_count
+
+    table = {"role": "user", "content": "Spreadsheet schema:\n[]\n\nUser request:\nx\n"}
+    profile = {"role": "user", "content": "Data profile:\nTable \"t\" (3 rows, 1 columns):"}
+    selection = {"role": "user", "content": "Current selection:\n- Active table: Sheet1"}
+    chat = _plain_chat_pairs(2)
+
+    assert detect_preserve_tail_count(chat + [table]) == 1
+    assert detect_preserve_tail_count(chat + [profile, table]) == 2
+    assert detect_preserve_tail_count(chat + [selection, profile, table]) == 3
+    # 母计划 §9 假设的旧顺序（profile 在最后）不成立，也不识别
+    assert detect_preserve_tail_count(chat + [table, profile]) == 0
+    assert detect_preserve_tail_count(chat) == 0
+    assert detect_preserve_tail_count([]) == 0
+
+
+def test_data_profile_protected_in_compacted_middle() -> None:
+    profile = {
+        "role": "user",
+        "content": "Data profile:\nTable \"Sheet1\" (100 rows, 2 columns):",
+    }
+    table = {"role": "user", "content": "Spreadsheet schema:\n[]\n\nUser request:\nx\n"}
+    msgs = _plain_chat_pairs(20) + [profile, table] + _plain_chat_pairs(20)
+    result = compact_agent_messages(msgs, preserve_tail_count=0)
+    assert profile in result
+    assert table in result
+    # profile 仍在 schema 消息之前
+    assert result.index(profile) < result.index(table)
+    plain = [m for m in result if not str(m.get("content", "")).startswith(EARLIER_PREFIX)]
+    assert len(plain) <= MAX_CHAT_TURNS + 2  # 上限内收缩，仅保护消息额外保留
+
+
+def test_tail_preservation_full_chain_of_three() -> None:
+    prefix = _plain_chat_pairs(30)
+    tail = [
+        {"role": "user", "content": "Current selection:\n- Active table: Sheet1"},
+        {"role": "user", "content": "Data profile:\nTable \"t\" (5 rows, 1 columns):"},
+        {"role": "user", "content": "Spreadsheet schema:\n[]"},
+    ]
+    result = compact_agent_messages(prefix + tail, preserve_tail_count=3)
+    assert result[-3:] == tail
+
+
 def test_tail_preservation_last_two_unchanged() -> None:
     prefix = _plain_chat_pairs(30)
     tail = [

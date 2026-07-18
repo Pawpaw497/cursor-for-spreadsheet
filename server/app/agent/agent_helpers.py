@@ -46,6 +46,7 @@ def run_tool_and_append_messages(
         tool_name=payload.tool_name,
         tool_args=payload.tool_args,
         tables=state.tables,
+        data_context=state.data_context,
     )
     tid = payload.tool_call_id or "tool-0"
     assistant_tool_calls = [
