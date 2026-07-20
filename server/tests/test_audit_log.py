@@ -33,7 +33,9 @@ def _schedule_audit_sync(**kwargs: object) -> None:
 
     thread = __import__("threading").Thread(target=_run)
     thread.start()
-    thread.join(timeout=5.0)
+    # /api/agent writes are heavier than the old /api/plan; slow CI runners
+    # exceeded 5s (2026-07-20 post-outage backlog), so allow a generous margin.
+    thread.join(timeout=30.0)
     assert not thread.is_alive(), "audit HTTP write timed out"
 
 
