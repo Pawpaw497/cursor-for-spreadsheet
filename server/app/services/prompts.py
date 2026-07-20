@@ -10,7 +10,6 @@ from pydantic import BaseModel, Field
 from app.services.prompt_content import (
     PROJECT_SYSTEM,
     SPREADSHEET_SYSTEM,
-    build_column_stats_text,
 )
 
 Role = Literal["system", "user", "assistant"]
@@ -43,43 +42,29 @@ class Message(BaseModel):
 
 
 class SingleTableUserContent(BaseModel):
-    """单表场景下发给 LLM 的用户内容结构（schema + 样本行 + 用户请求）。"""
+    """单表场景下发给 LLM 的用户内容结构（schema + 用户请求）。
+
+    行级统计由 Data profile / DataContext 提供，不再渲染样本行。
+    """
 
     user_prompt: str = Field(alias="user_prompt")
     schema_: List[Dict[str, Any]] = Field(alias="schema")
-    sample_rows: List[Dict[str, Any]] = Field(
-        default_factory=list, alias="sample_rows")
 
     model_config = {"populate_by_name": True}
 
     def to_prompt_string(self) -> str:
-        """序列化为 prompt 中的 user 消息正文。
-
-        Agent 路径传空 sample_rows（统计由 Data profile / DataContext 提供），
-        只渲染 schema + user request；legacy `/api/plan` 传非空样本时保留
-        原 sample dump + stats，随 Stage 5 退役。
-        """
+        """序列化为 prompt 中的 user 消息正文（schema + user request）。"""
         schema_str = json.dumps(self.schema_, ensure_ascii=False, indent=2)
         parts = ["Spreadsheet schema:\n", f"{schema_str}\n\n"]
-        if self.sample_rows:
-            rows_str = json.dumps(self.sample_rows, ensure_ascii=False, indent=2)
-            col_keys: List[str] = []
-            for c in self.schema_:
-                if isinstance(c, dict) and c.get("key"):
-                    col_keys.append(str(c["key"]))
-            stats = build_column_stats_text(self.sample_rows, col_keys or None)
-            parts.extend(["Sample rows:\n", f"{rows_str}\n\n", stats])
         parts.extend(["User request:\n", f"{self.user_prompt}\n"])
         return "".join(parts)
 
 
 class TableBlock(BaseModel):
-    """多表场景下的一张表：表名 + schema + 样本行。"""
+    """多表场景下的一张表：表名 + schema。"""
 
     name: str
     schema_: List[Dict[str, Any]] = Field(default_factory=list, alias="schema")
-    sample_rows: List[Dict[str, Any]] = Field(
-        default_factory=list, alias="sample_rows")
 
     model_config = {"populate_by_name": True}
 
@@ -97,20 +82,7 @@ class ProjectUserContent(BaseModel):
             schema_str = json.dumps(t.schema_, ensure_ascii=False, indent=2)
             parts.append(f"Table '{t.name}':")
             parts.append(f"  schema: {schema_str}")
-            # Agent 路径 sample_rows 为空（统计走 Data profile）；legacy 路径保留原样。
-            if not t.sample_rows:
-                parts.append("\n")
-            else:
-                rows_str = json.dumps(t.sample_rows, ensure_ascii=False, indent=2)
-                col_keys: List[str] = []
-                for c in t.schema_:
-                    if isinstance(c, dict) and c.get("key"):
-                        col_keys.append(str(c["key"]))
-                stats = build_column_stats_text(t.sample_rows, col_keys or None)
-                parts.append(f"  sample rows: {rows_str}\n")
-                if stats:
-                    for line in stats.rstrip("\n").split("\n"):
-                        parts.append(f"  {line}\n")
+            parts.append("\n")
         parts.append(f"User request:\n{self.user_prompt}\n")
         return "".join(parts)
 
@@ -139,22 +111,21 @@ class SpreadsheetPrompt:
     def __init__(self, system: str | None = None) -> None:
         self.system = system if system is not None else SPREADSHEET_SYSTEM
 
-    def build_user_content(self, user_prompt: str, schema: Any, sample_rows: Any) -> str:
+    def build_user_content(self, user_prompt: str, schema: Any) -> str:
         """构建单表 user 消息正文。schema 可为 List[ColumnSchema] 或 List[dict]。"""
         content = SingleTableUserContent(
             user_prompt=user_prompt,
             schema=_normalize_schema(schema),
-            sample_rows=list(sample_rows) if sample_rows else [],
         )
         return content.to_prompt_string()
 
     def single_turn_messages(self, user_content: str) -> List[Message]:
         return [Message.system(self.system), Message.user(user_content)]
 
-    def messages(self, user_prompt: str, schema: Any, sample_rows: Any) -> List[Message]:
-        """单轮：system + 根据 schema/sample_rows 构建的 user 消息。"""
+    def messages(self, user_prompt: str, schema: Any) -> List[Message]:
+        """单轮：system + 根据 schema 构建的 user 消息。"""
         return self.single_turn_messages(
-            self.build_user_content(user_prompt, schema, sample_rows)
+            self.build_user_content(user_prompt, schema)
         )
 
 
@@ -165,16 +136,14 @@ class ProjectPrompt:
         self.system = system if system is not None else PROJECT_SYSTEM
 
     def build_user_content(self, user_prompt: str, tables: List[dict]) -> str:
-        """构建多表 user 消息正文。tables 每项含 name, schema/schema_, sampleRows/sample_rows。"""
+        """构建多表 user 消息正文。tables 每项含 name, schema/schema_。"""
         blocks = []
         for t in tables:
             schema_val = _normalize_schema(t.get("schema") or t.get("schema_"))
-            sample_rows = t.get("sampleRows") or t.get("sample_rows") or []
             blocks.append(
                 TableBlock(
                     name=t["name"],
                     schema=schema_val,
-                    sample_rows=list(sample_rows),
                 )
             )
         content = ProjectUserContent(tables=blocks, user_prompt=user_prompt)
@@ -215,9 +184,8 @@ def build_messages(
     return out
 
 
-def build_user_prompt(user_prompt: str, schema: Any, sample_rows: Any) -> str:
-    return _default_spreadsheet_prompt.build_user_content(
-        user_prompt, schema, sample_rows)
+def build_user_prompt(user_prompt: str, schema: Any) -> str:
+    return _default_spreadsheet_prompt.build_user_content(user_prompt, schema)
 
 
 def build_project_user_prompt(user_prompt: str, tables: List[dict]) -> str:

@@ -14,9 +14,10 @@ from app.services.prompt_content import (
     build_spreadsheet_system,
 )
 
-# Baselines after compact-schema rollout (2026-05). Raise only when Plan grows.
-MAX_SPREADSHEET_SYSTEM_CHARS = 11_000
-MAX_PROJECT_SYSTEM_CHARS = 11_000
+# Baselines after compact-schema rollout (2026-05). Raise only when Plan grows
+# or an output rule is added (2026-07: +1 rule against stringified steps).
+MAX_SPREADSHEET_SYSTEM_CHARS = 11_050
+MAX_PROJECT_SYSTEM_CHARS = 11_050
 MAX_PLAN_SCHEMA_JSON_CHARS = 9_000
 
 # Pre-compact prompts were ~26k chars; guard meaningful token savings.

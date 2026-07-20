@@ -65,15 +65,40 @@ class PaTurnResult:
     final_result_error: str | None = None
 
 
+def _normalize_stringified_steps(args: dict[str, Any]) -> dict[str, Any]:
+    """部分模型把 steps 元素输出为 JSON 字符串而非对象；逐元素宽容解析。
+
+    只转换能成功 ``json.loads`` 出 dict 的字符串元素，其余原样保留，
+    留给 ``Plan.model_validate`` 报真实错误。
+    """
+    steps = args.get("steps")
+    if not isinstance(steps, list) or not any(isinstance(s, str) for s in steps):
+        return args
+    normalized: list[Any] = []
+    for step in steps:
+        if isinstance(step, str):
+            try:
+                parsed = json.loads(extract_json(step.strip()))
+            except (json.JSONDecodeError, ValueError):
+                normalized.append(step)
+                continue
+            normalized.append(parsed if isinstance(parsed, dict) else step)
+        else:
+            normalized.append(step)
+    return {**args, "steps": normalized}
+
+
 def _coerce_plan_from_final_result_args(args: Any) -> Plan:
     """Accept Plan | dict | JSON string from pydantic-ai final_result."""
     if isinstance(args, Plan):
         return args
     if isinstance(args, dict):
-        return Plan.model_validate(args)
+        return Plan.model_validate(_normalize_stringified_steps(args))
     if isinstance(args, str):
         json_text = extract_json(args.strip())
         parsed = json.loads(json_text)
+        if isinstance(parsed, dict):
+            parsed = _normalize_stringified_steps(parsed)
         return Plan.model_validate(parsed)
     return Plan.model_validate(args)
 
@@ -255,19 +280,13 @@ async def _finish_from_plan_text(
             prompt = SpreadsheetPrompt()
             t = state.tables[0]
             user_content = (
-                prompt.build_user_content(
-                    state.user_prompt, t.schema, []
-                )
+                prompt.build_user_content(state.user_prompt, t.schema)
                 + retry_user_suffix
             )
         else:
             prompt = ProjectPrompt()
             tables_data = [
-                {
-                    "name": t.name,
-                    "schema": t.schema,
-                    "sampleRows": [],
-                }
+                {"name": t.name, "schema": t.schema}
                 for t in state.tables
             ]
             user_content = (

@@ -66,3 +66,33 @@ def test_agent_returns_clarification_kind(client: TestClient) -> None:
     ctx = data["clarification"].get("context")
     assert ctx
     assert "Ambiguous" in ctx
+
+
+def test_gate_fires_when_plan_omits_table(client: TestClient) -> None:
+    """真实 orchestrator + gate：多表下 LLM 产出缺 table 的 write step → 澄清。
+
+    锁定确定性澄清兜底（eval 侧 ambiguous case 已放宽为「澄清或显式合法 table」，
+    此处保证 gate 路径本身不回归）。
+    """
+    from app.agent.pa_decision import PaTurnResult
+    from app.models.plan import Plan
+
+    plan = Plan.model_validate(
+        {
+            "intent": "add x",
+            "steps": [{"action": "add_column", "name": "x", "expression": "1"}],
+        }
+    )
+    turn = PaTurnResult(tool_parts=[], text="", structured_plan=plan)
+
+    with patch(
+        "app.agent.pa_decision._run_pa_single_turn",
+        new=AsyncMock(return_value=turn),
+    ):
+        resp = client.post("/api/agent", json=_two_table_agent_body())
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["kind"] == "clarification"
+    assert data.get("plan") is None
+    assert set(data["clarification"]["options"]) == {"Sheet1", "Sheet2"}

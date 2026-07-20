@@ -102,12 +102,12 @@ def test_record_http_and_llm_roundtrip(audit_initialized: Path) -> None:
             await audit_mod.record_http_request(
                 trace_id="trace-db-unit",
                 method="POST",
-                path="/api/plan",
+                path="/api/agent",
                 request_body={"prompt": "hi"},
                 response_status=200,
                 response_body={"ok": True},
                 duration_ms=12.5,
-                request_kind="plan",
+                request_kind="agent",
             )
             await audit_mod.record_llm_call(
                 trace_id="trace-db-unit",
@@ -148,44 +148,52 @@ def test_audit_log_module_has_no_memory_writes() -> None:
     assert "AgentSessionMemory" not in text
 
 
-def test_middleware_records_plan_request(
+def test_middleware_records_agent_request(
     audit_initialized: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(settings, "OPENROUTER_API_KEY", "k")
-    plan_json = {
-        "intent": "x",
-        "steps": [{"action": "add_column", "name": "c", "expression": "1"}],
-    }
+    plan = Plan.model_validate(
+        {
+            "intent": "x",
+            "steps": [{"action": "add_column", "name": "c", "expression": "1"}],
+        }
+    )
+    turn = PaTurnResult(tool_parts=[], text="", structured_plan=plan)
 
-    async def fake_call_llm(**kwargs: object) -> str:
-        return json.dumps(plan_json)
-
-    monkeypatch.setattr("app.api.routes.plan.call_llm", fake_call_llm)
     monkeypatch.setattr("app.main.schedule_record_http_request", _schedule_audit_sync)
 
     body = {
         "prompt": "add column",
-        "schema": [{"key": "a", "type": "string"}],
-        "sampleRows": [{"a": "1"}],
+        "tables": [
+            {
+                "name": "Sheet1",
+                "schema": [{"key": "a", "type": "string"}],
+            }
+        ],
         "modelSource": "cloud",
+        "previewLifecycle": False,
     }
-    with TestClient(app) as client:
-        resp = client.post(
-            "/api/plan",
-            json=body,
-            headers={"X-Request-ID": "trace-mw-plan"},
-        )
-        assert resp.status_code == 200
+    with patch(
+        "app.agent.pa_decision._run_pa_single_turn",
+        new=AsyncMock(return_value=turn),
+    ):
+        with TestClient(app) as client:
+            resp = client.post(
+                "/api/agent",
+                json=body,
+                headers={"X-Request-ID": "trace-mw-agent"},
+            )
+            assert resp.status_code == 200
 
     async def check() -> None:
         # App lifespan may close the engine after TestClient exits; reconnect to the same DB file.
         await audit_db.init_audit_db()
-        rows = await _http_rows("trace-mw-plan")
+        rows = await _http_rows("trace-mw-agent")
         assert len(rows) >= 1
         row = rows[0]
         assert row.method == "POST"
-        assert row.path == "/api/plan"
-        assert row.request_kind == "plan"
+        assert row.path == "/api/agent"
+        assert row.request_kind == "agent"
         assert row.response_status == 200
 
     asyncio.run(check())

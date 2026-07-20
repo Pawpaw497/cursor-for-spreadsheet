@@ -1,5 +1,4 @@
 """Plan 相关路由。"""
-import json
 import time
 from collections import Counter
 from typing import Dict, List
@@ -12,12 +11,7 @@ from app.models import (
     ExecutePlanResponse,
     ExecuteProjectPlanRequest,
     Plan,
-    PlanRequest,
-    PlanResponse,
-    ProjectPlanByIdRequest,
-    ProjectPlanRequest,
 )
-from app.services.llm import call_llm
 from app.services.plan_executor import (
     ApplyResult,
     ProjectApplyResult,
@@ -25,12 +19,6 @@ from app.services.plan_executor import (
     TableData,
     apply_plan,
     apply_project_plan,
-)
-from app.services.prompts import (
-    Message,
-    ProjectPrompt,
-    SpreadsheetPrompt,
-    extract_json,
 )
 from app.services.projects import project_store
 
@@ -52,55 +40,6 @@ def _tables_shape_summary(tables: Dict[str, TableData]) -> str:
     for name, t in sorted(tables.items()):
         parts.append(f"{name}:r{len(t.rows)}c{len(t.schema)}")
     return ";".join(parts)
-
-
-async def _parse_and_validate_plan(
-    content: str,
-    retry_user: str,
-    system_prompt: str,
-    model_source: str,
-    *,
-    cloud_model_id: str | None = None,
-    local_model_id: str | None = None,
-) -> Plan:
-    """解析 LLM 返回的 JSON 并校验为 Plan，失败时重试一次。"""
-    json_text = extract_json(content)
-    try:
-        parsed = json.loads(json_text)
-    except json.JSONDecodeError as e:
-        preview = (json_text[:200] + "…") if len(json_text) > 200 else json_text
-        log.warning("plan json parse failed first_try err=%s preview=%s", e, preview)
-        retry_messages = [Message.system(system_prompt), Message.user(retry_user)]
-        try:
-            content = await call_llm(
-                model_source=model_source,
-                messages=retry_messages,
-                cloud_model_id=cloud_model_id,
-                local_model_id=local_model_id,
-            )
-        except RuntimeError as e:
-            raise _http_exception_from_runtime(e) from e
-        json_text = extract_json(content)
-        try:
-            parsed = json.loads(json_text)
-        except json.JSONDecodeError as e2:
-            log.error(
-                "plan json parse failed after_retry err=%s raw_preview=%s",
-                e2,
-                (content[:200] + "…") if len(content) > 200 else content,
-            )
-            raise HTTPException(
-                status_code=500,
-                detail=f"[500] Model did not return valid JSON: {e2}. Raw: {content}",
-            )
-    try:
-        return Plan.model_validate(parsed)
-    except Exception as e:
-        log.error("plan validation failed err=%s", e)
-        raise HTTPException(
-            status_code=500,
-            detail=f"[500] Plan validation failed: {e}. Raw: {parsed}",
-        )
 
 
 def _http_exception_from_runtime(e: RuntimeError) -> HTTPException:
@@ -135,93 +74,6 @@ def _http_exception_from_runtime(e: RuntimeError) -> HTTPException:
         return HTTPException(status_code=502, detail=detail)
 
     return HTTPException(status_code=502, detail=_detail_502())
-
-
-@router.post("/plan", response_model=PlanResponse)
-async def plan(req: PlanRequest):
-    t0 = time.perf_counter()
-    log.info(
-        "plan_request mode=single_table model_source=%s prompt_len=%d schema_cols=%d sample_rows=%d",
-        req.modelSource or "cloud",
-        len(req.prompt or ""),
-        len(req.schema_),
-        len(req.sampleRows),
-    )
-    prompt = SpreadsheetPrompt()
-    user_content = prompt.build_user_content(req.prompt, req.schema_, req.sampleRows)
-    model_source = req.modelSource or "cloud"
-    messages = prompt.single_turn_messages(user_content)
-    try:
-        content = await call_llm(
-            model_source=model_source,
-            messages=messages,
-            cloud_model_id=req.cloudModelId,
-            local_model_id=req.localModelId,
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=f"[400] {e}")
-    except RuntimeError as e:
-        raise _http_exception_from_runtime(e)
-
-    plan_obj = await _parse_and_validate_plan(
-        content=content,
-        retry_user=user_content + "\nReturn ONLY JSON.",
-        system_prompt=prompt.system,
-        model_source=model_source,
-        cloud_model_id=req.cloudModelId,
-        local_model_id=req.localModelId,
-    )
-    log.info(
-        "plan_response mode=single_table steps=%d step_summary=%s elapsed_ms=%.2f",
-        len(plan_obj.steps),
-        _step_type_summary(plan_obj),
-        (time.perf_counter() - t0) * 1000,
-    )
-    return PlanResponse(plan=plan_obj)
-
-
-@router.post("/plan-project", response_model=PlanResponse)
-async def plan_project(req: ProjectPlanRequest):
-    """Project-level planning: accepts multiple tables and can generate join/create_table steps."""
-    t0 = time.perf_counter()
-    log.info(
-        "plan_request mode=project_tables model_source=%s tables=%d prompt_len=%d",
-        req.modelSource or "cloud",
-        len(req.tables),
-        len(req.prompt or ""),
-    )
-    tables_data = [t.model_dump() for t in req.tables]
-    prompt = ProjectPrompt()
-    user_content = prompt.build_user_content(req.prompt, tables_data)
-    model_source = req.modelSource or "cloud"
-    messages = prompt.single_turn_messages(user_content)
-    try:
-        content = await call_llm(
-            model_source=model_source,
-            messages=messages,
-            cloud_model_id=req.cloudModelId,
-            local_model_id=req.localModelId,
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=f"[400] {e}")
-    except RuntimeError as e:
-        raise _http_exception_from_runtime(e)
-
-    plan_obj = await _parse_and_validate_plan(
-        content=content,
-        retry_user=user_content + "\nReturn ONLY JSON.",
-        system_prompt=prompt.system,
-        model_source=model_source,
-        cloud_model_id=req.cloudModelId,
-        local_model_id=req.localModelId,
-    )
-    log.info(
-        "plan_response mode=project_tables steps=%d step_summary=%s elapsed_ms=%.2f",
-        len(plan_obj.steps),
-        _step_type_summary(plan_obj),
-        (time.perf_counter() - t0) * 1000,
-    )
-    return PlanResponse(plan=plan_obj)
 
 
 @router.post("/execute-plan", response_model=ExecutePlanResponse)
@@ -304,78 +156,6 @@ def _tabledata_to_execute_table(table: TableData):
     from app.models import ExecuteTable
 
     return ExecuteTable(name=table.name, rows=list(table.rows), schema=schema_payload)
-
-
-@router.post("/projects/{project_id}/plan", response_model=PlanResponse)
-async def project_plan_from_store(
-    project_id: str,
-    req: ProjectPlanByIdRequest,
-) -> PlanResponse:
-    """基于后端 ProjectState 生成项目级 Plan（多表），前端只需传 prompt 与模型信息。"""
-    t0 = time.perf_counter()
-    state = project_store.get_project(project_id)
-    if not state:
-        raise HTTPException(status_code=404, detail=f"[404] Project not found: {project_id!r}")
-
-    # 将 ProjectState 中的表转换为 ProjectPrompt 所需的数据结构。
-    tables_data: List[Dict[str, object]] = []
-    for name, t in state.tables.items():
-        rows = t.get("rows") or []
-        schema = t.get("schema") or []
-        sample_rows = rows[:10]
-        tables_data.append(
-            {
-                "name": name,
-                "schema": schema,
-                "sampleRows": sample_rows,
-            }
-        )
-
-    if not tables_data:
-        raise HTTPException(
-            status_code=400,
-            detail=f"[400] Project {project_id!r} has no tables",
-        )
-
-    log.info(
-        "plan_request mode=project_id project_id=%s model_source=%s tables=%d prompt_len=%d",
-        project_id,
-        req.modelSource or "cloud",
-        len(tables_data),
-        len(req.prompt or ""),
-    )
-    prompt = ProjectPrompt()
-    user_content = prompt.build_user_content(req.prompt, tables_data)
-    model_source = req.modelSource or "cloud"
-    messages = prompt.single_turn_messages(user_content)
-    try:
-        content = await call_llm(
-            model_source=model_source,
-            messages=messages,
-            cloud_model_id=req.cloudModelId,
-            local_model_id=req.localModelId,
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=f"[400] {e}")
-    except RuntimeError as e:
-        raise _http_exception_from_runtime(e)
-
-    plan_obj = await _parse_and_validate_plan(
-        content=content,
-        retry_user=user_content + "\nReturn ONLY JSON.",
-        system_prompt=prompt.system,
-        model_source=model_source,
-        cloud_model_id=req.cloudModelId,
-        local_model_id=req.localModelId,
-    )
-    log.info(
-        "plan_response mode=project_id project_id=%s steps=%d step_summary=%s elapsed_ms=%.2f",
-        project_id,
-        len(plan_obj.steps),
-        _step_type_summary(plan_obj),
-        (time.perf_counter() - t0) * 1000,
-    )
-    return PlanResponse(plan=plan_obj)
 
 
 @router.post("/projects/{project_id}/execute-plan", response_model=ExecutePlanResponse)

@@ -99,7 +99,7 @@ async def agent(req: AgentProjectPlanRequest):
     """
     使用 Agent 循环（多轮 LLM + 工具）生成执行计划。
 
-    请求体与 /api/plan-project 相同，并支持可选 ``previewLifecycle`` 与预览决策字段。
+    请求体为 prompt + tables（含 tableRef），并支持可选 ``previewLifecycle`` 与预览决策字段。
     """
     preview_lifecycle = bool(req.previewLifecycle)
     project_snapshot = _resolve_project_tables_optional(req)
