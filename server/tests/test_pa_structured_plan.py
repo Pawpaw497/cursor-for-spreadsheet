@@ -165,3 +165,57 @@ def test_pa_decision_missing_structured_without_fallback() -> None:
         assert "structured_plan_missing" in (action.payload.reason or "")
 
     asyncio.run(run())
+
+
+def test_partition_tool_calls_stringified_steps() -> None:
+    """模型把 steps 元素输出为 JSON 字符串（eval sales case 422 的根因）→ 宽容解析。"""
+    plan = _plan()
+    raw = plan.model_dump()
+    raw["steps"] = [json.dumps(s) for s in raw["steps"]]
+    _, parsed, err = partition_tool_calls(
+        [
+            ToolCallPart(
+                tool_name=PA_OUTPUT_TOOL_NAME,
+                args=raw,
+                tool_call_id="out1",
+            ),
+        ]
+    )
+    assert err is None
+    assert parsed is not None
+    assert parsed.intent == "add x"
+    assert parsed.steps[0].action == "add_column"
+
+
+def test_partition_tool_calls_stringified_steps_in_string_args() -> None:
+    """整个 args 是字符串且内部 steps 元素也是字符串（双层）→ 宽容解析。"""
+    plan = _plan()
+    raw = plan.model_dump()
+    raw["steps"] = [json.dumps(s) for s in raw["steps"]]
+    _, parsed, err = partition_tool_calls(
+        [
+            ToolCallPart(
+                tool_name=PA_OUTPUT_TOOL_NAME,
+                args=json.dumps(raw),
+                tool_call_id="out1",
+            ),
+        ]
+    )
+    assert err is None
+    assert parsed is not None
+    assert parsed.steps[0].action == "add_column"
+
+
+def test_partition_tool_calls_unparseable_step_still_errors() -> None:
+    """不可解析的 steps 元素（如 None / 坏字符串）保留原样 → 仍报 validation 错误。"""
+    _, parsed, err = partition_tool_calls(
+        [
+            ToolCallPart(
+                tool_name=PA_OUTPUT_TOOL_NAME,
+                args={"intent": "x", "steps": [None, "not json {{{"]},
+                tool_call_id="out1",
+            ),
+        ]
+    )
+    assert parsed is None
+    assert err is not None

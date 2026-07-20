@@ -31,11 +31,12 @@ class EvalCase:
     id: str
     title: str
     prompt: str
-    endpoint: Literal["plan_project", "agent"] = "plan_project"
     target_tables: tuple[str, ...] = ()
     required_actions: frozenset[str] = field(default_factory=frozenset)
     min_steps: int = 1
-    expect_clarification: bool = False
+    # 模糊请求：允许澄清，或直接出 plan 但所有 write step 必须显式指定合法 table
+    # （禁止的是 silent 缺表 / 指向不存在的表；模型带 Data profile 自选表是合法行为）。
+    ambiguous_target: bool = False
     check: Optional[CheckFn] = None
 
 
@@ -241,14 +242,15 @@ CASES: list[EvalCase] = [
         min_steps=4,
         check=_check_dept_risk_flag_create_table,
     ),
-    # 新设计：验证已上线的澄清能力（衔接 docs/agent-improvements.md 第七节）。
-    # 后续扩展澄清场景时，应在此追加同类 endpoint="agent" 用例。
+    # 模糊目标：多表 + 未点名表时不得 silent 出错 —— 要么澄清（gate 或模型主动），
+    # 要么 plan 显式指定合法 table（Data profile 加持下模型自选表是合法行为，
+    # preview lifecycle 提供反悔安全网）。gate 触发本身由 test_clarification.py
+    # 等确定性单测守卫。
     EvalCase(
-        id="ambiguous_add_column_needs_clarification",
-        title="多表场景下未指定表的新增列请求应触发澄清",
+        id="ambiguous_add_column_no_silent_target",
+        title="多表场景下未指定表的新增列请求：澄清或显式指定合法表",
         prompt="帮我新增一列'备注'，值先留空即可。",
-        endpoint="agent",
         target_tables=("销售订单", "产品信息"),
-        expect_clarification=True,
+        ambiguous_target=True,
     ),
 ]

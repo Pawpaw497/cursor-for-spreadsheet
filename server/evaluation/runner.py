@@ -1,5 +1,5 @@
 """评估用例执行器：进程内调用 FastAPI app（复用 tests/test_cloud_llm_sample_e2e.py 的
-TestClient 模式），跑通 `/api/load-sample` -> `/api/plan-project`(或 `/api/agent`) ->
+TestClient 模式），跑通 `/api/load-sample` -> `/api/data/upload` -> `/api/agent` ->
 `/api/execute-plan`，按 server/evaluation/cases.py 中的用例定义做结构/执行/行为断言。
 """
 from __future__ import annotations
@@ -40,12 +40,21 @@ def load_sample_tables(client: TestClient) -> dict[str, dict[str, Any]]:
 
 
 def _plan_tables_payload(
-    all_tables: dict[str, dict[str, Any]], names: tuple[str, ...]
+    client: TestClient, all_tables: dict[str, dict[str, Any]], names: tuple[str, ...]
 ) -> list[dict[str, Any]]:
-    return [
-        {"name": n, "schema": all_tables[n]["schema"], "sampleRows": all_tables[n]["rows"]}
-        for n in names
-    ]
+    """上传全量 rows 到 data store，返回携带 tableRef 的 agent 请求表列表。"""
+    payload: list[dict[str, Any]] = []
+    for n in names:
+        t = all_tables[n]
+        upload = client.post(
+            "/api/data/upload",
+            json={"name": n, "schema": t["schema"], "rows": t["rows"]},
+        )
+        upload.raise_for_status()
+        payload.append(
+            {"name": n, "schema": t["schema"], "tableRef": upload.json()["tableId"]}
+        )
+    return payload
 
 
 def _execute_tables_payload(
@@ -55,6 +64,27 @@ def _execute_tables_payload(
         {"name": n, "schema": all_tables[n]["schema"], "rows": all_tables[n]["rows"]}
         for n in names
     ]
+
+
+def _check_no_silent_target(data: dict[str, Any], known_tables: set[str]) -> list[str]:
+    """模糊目标请求未澄清时：plan 必须存在，且每个 write step 显式指定合法 table。"""
+    plan_data = data.get("plan")
+    if plan_data is None:
+        return [f"expected clarification or plan, got kind={data.get('kind')!r}"]
+    try:
+        plan = Plan.model_validate(plan_data)
+    except Exception as exc:
+        return [f"Plan validation failed: {exc}"]
+    failures: list[str] = []
+    for idx, step in enumerate(plan.steps):
+        if step.action not in ("add_column", "transform_column"):
+            continue
+        table = getattr(step, "table", None)
+        if not table:
+            failures.append(f"step #{idx} {step.action}: no explicit table (silent target)")
+        elif table not in known_tables:
+            failures.append(f"step #{idx} {step.action}: unknown table {table!r}")
+    return failures
 
 
 def run_case(
@@ -67,9 +97,13 @@ def run_case(
     local_model_id: Optional[str],
 ) -> EvalCaseResult:
     t0 = time.perf_counter()
+    try:
+        tables_payload = _plan_tables_payload(client, all_tables, case.target_tables)
+    except Exception as exc:
+        return EvalCaseResult(case.id, case.title, False, elapsed_ms=_elapsed_ms(t0), error=str(exc))
     body: dict[str, Any] = {
         "prompt": case.prompt,
-        "tables": _plan_tables_payload(all_tables, case.target_tables),
+        "tables": tables_payload,
         "modelSource": model_source,
     }
     if cloud_model_id:
@@ -77,9 +111,8 @@ def run_case(
     if local_model_id:
         body["localModelId"] = local_model_id
 
-    endpoint = "/api/agent" if case.endpoint == "agent" else "/api/plan-project"
     try:
-        resp = client.post(endpoint, json=body)
+        resp = client.post("/api/agent", json=body)
     except Exception as exc:  # network / connection errors (Ollama not running, etc.)
         return EvalCaseResult(case.id, case.title, False, elapsed_ms=_elapsed_ms(t0), error=str(exc))
 
@@ -94,15 +127,13 @@ def run_case(
 
     data = resp.json()
 
-    if case.expect_clarification:
+    if case.ambiguous_target:
         is_clarification = data.get("kind") == "clarification" and bool(
             (data.get("clarification") or {}).get("options")
         )
-        failures = (
-            []
-            if is_clarification
-            else [f"expected clarification with options, got kind={data.get('kind')!r}"]
-        )
+        if is_clarification:
+            return EvalCaseResult(case.id, case.title, True, elapsed_ms=_elapsed_ms(t0))
+        failures = _check_no_silent_target(data, set(case.target_tables))
         return EvalCaseResult(
             case.id, case.title, not failures, failures, elapsed_ms=_elapsed_ms(t0)
         )

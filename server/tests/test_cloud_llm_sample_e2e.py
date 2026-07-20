@@ -1,4 +1,4 @@
-"""Opt-in integration: load-sample xlsx → cloud LLM → validated Plan.
+"""Opt-in integration: load-sample xlsx → upload → /api/agent → validated Plan.
 
 Aligned with README sample path (`GET /api/load-sample` → `test-data/sample.xlsx`).
 Full prompt catalog: `test-data/test-prompts.md`.
@@ -33,7 +33,7 @@ def client() -> TestClient:
 
 
 @pytest.mark.integration
-def test_cloud_plan_project_with_load_sample(client: TestClient) -> None:
+def test_cloud_agent_plan_with_load_sample(client: TestClient) -> None:
     if os.environ.get("RUN_CLOUD_LLM_E2E") != "1":
         pytest.skip("Set RUN_CLOUD_LLM_E2E=1 to run cloud LLM E2E")
 
@@ -45,14 +45,20 @@ def test_cloud_plan_project_with_load_sample(client: TestClient) -> None:
     load = client.get("/api/load-sample")
     assert load.status_code == 200, load.text
     payload = load.json()
-    tables_body = [
-        {
-            "name": t["name"],
-            "schema": t["schema"],
-            "sampleRows": t["rows"],
-        }
-        for t in payload["tables"]
-    ]
+    tables_body = []
+    for t in payload["tables"]:
+        upload = client.post(
+            "/api/data/upload",
+            json={"name": t["name"], "schema": t["schema"], "rows": t["rows"]},
+        )
+        assert upload.status_code == 200, upload.text
+        tables_body.append(
+            {
+                "name": t["name"],
+                "schema": t["schema"],
+                "tableRef": upload.json()["tableId"],
+            }
+        )
     body: dict = {
         "prompt": SAMPLE_PROMPT,
         "tables": tables_body,
@@ -62,9 +68,9 @@ def test_cloud_plan_project_with_load_sample(client: TestClient) -> None:
     if model_id:
         body["cloudModelId"] = model_id
 
-    resp = client.post("/api/plan-project", json=body)
+    resp = client.post("/api/agent", json=body)
     if resp.status_code != 200:
-        pytest.skip(f"plan-project not OK ({resp.status_code}): {resp.text[:500]}")
+        pytest.skip(f"agent not OK ({resp.status_code}): {resp.text[:500]}")
 
     data = resp.json()
     plan = Plan.model_validate(data["plan"])

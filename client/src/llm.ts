@@ -283,7 +283,7 @@ const FALLBACK_LLM_CLIENT_TIMEOUT_MS = 150_000;
 
 let configuredLlmClientTimeoutMs: number | null = null;
 
-/** 当前用于 `/api/plan*`、`/api/agent*` 等 LLM 调用的客户端超时（毫秒）。 */
+/** 当前用于 `/api/agent*` 等 LLM 调用的客户端超时（毫秒）。 */
 export function getLlmClientTimeoutMs(): number {
   return configuredLlmClientTimeoutMs ?? FALLBACK_LLM_CLIENT_TIMEOUT_MS;
 }
@@ -548,43 +548,6 @@ export async function fetchConfig(): Promise<ConfigResponse> {
     configuredLlmClientTimeoutMs = Math.floor(data.llmClientTimeoutRecommendedMs);
   }
   return data;
-}
-
-export async function requestPlan(opts: {
-  prompt: string;
-  schema: SchemaCol[];
-  sampleRows: Record<string, any>[];
-  modelSource?: ModelSource;
-  cloudModelId?: string;
-  localModelId?: string;
-  /** 与 UI 事件对齐的请求 ID；缺省时由 fetch 层生成。 */
-  traceId?: string;
-}): Promise<Plan> {
-  const resp = await fetchWithTimeout(
-    `${API_BASE}/api/plan`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        prompt: opts.prompt,
-        schema: opts.schema,
-        sampleRows: opts.sampleRows,
-        modelSource: opts.modelSource ?? "cloud",
-        cloudModelId: opts.cloudModelId ?? undefined,
-        localModelId: opts.localModelId ?? undefined
-      })
-    },
-    getLlmClientTimeoutMs(),
-    { operation: "request_plan", traceId: opts.traceId }
-  );
-
-  if (!resp.ok) {
-    const txt = await resp.text();
-    throw new Error(errorMessageFromResponse(resp, txt));
-  }
-
-  const data = await resp.json();
-  return PlanSchema.parse(data.plan);
 }
 
 export function parseAgentPreviewRecord(raw: Record<string, unknown>): PreviewRecord {
@@ -878,45 +841,6 @@ export async function requestAgentProjectPlan(
   throw new Error("Unexpected /api/agent response shape");
 }
 
-export async function requestProjectPlan(opts: {
-  prompt: string;
-  tables: TableData[];
-  modelSource?: ModelSource;
-  cloudModelId?: string;
-  localModelId?: string;
-  traceId?: string;
-}): Promise<Plan> {
-  const payload = {
-    prompt: opts.prompt,
-    tables: opts.tables.map((t) => ({
-      name: t.name,
-      schema: t.schema,
-      sampleRows: t.rows.slice(0, 10)
-    })),
-    modelSource: opts.modelSource ?? "cloud",
-    cloudModelId: opts.cloudModelId ?? undefined,
-    localModelId: opts.localModelId ?? undefined
-  };
-  const resp = await fetchWithTimeout(
-    `${API_BASE}/api/plan-project`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    },
-    getLlmClientTimeoutMs(),
-    { operation: "request_project_plan", traceId: opts.traceId }
-  );
-
-  if (!resp.ok) {
-    const txt = await resp.text();
-    throw new Error(errorMessageFromResponse(resp, txt));
-  }
-
-  const data = await resp.json();
-  return PlanSchema.parse(data.plan);
-}
-
 type LoadSampleResponse = {
   projectId: string;
   tables: {
@@ -1006,41 +930,6 @@ export async function fetchSampleTablesWithRetry(opts?: {
     }
   }
   throw lastError ?? new Error("加载示例失败");
-}
-
-/** 基于后端 ProjectState 生成项目级 Plan。*/
-export async function requestProjectPlanById(opts: {
-  projectId: string;
-  prompt: string;
-  modelSource?: ModelSource;
-  cloudModelId?: string;
-  localModelId?: string;
-  traceId?: string;
-}): Promise<Plan> {
-  const payload = {
-    prompt: opts.prompt,
-    modelSource: opts.modelSource ?? "cloud",
-    cloudModelId: opts.cloudModelId ?? undefined,
-    localModelId: opts.localModelId ?? undefined
-  };
-  const resp = await fetchWithTimeout(
-    `${API_BASE}/api/projects/${encodeURIComponent(opts.projectId)}/plan`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    },
-    getLlmClientTimeoutMs(),
-    { operation: "request_project_plan_by_id", traceId: opts.traceId }
-  );
-
-  if (!resp.ok) {
-    const txt = await resp.text();
-    throw new Error(errorMessageFromResponse(resp, txt));
-  }
-
-  const data = await resp.json();
-  return PlanSchema.parse(data.plan);
 }
 
 /** 将当前项目导出为 Excel 文件，返回 Blob。*/

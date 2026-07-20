@@ -17,7 +17,6 @@ import {
   fetchSampleTables,
   fetchSampleTablesWithRetry,
   requestAgentProjectPlan,
-  requestPlan,
   splitApiErrorDetail,
   uploadProjectFile
 } from "./llm";
@@ -1285,151 +1284,59 @@ export default function App() {
     });
     setStatus(modelSource === "cloud" ? "Calling cloud LLM…" : "Calling local LLM…");
     try {
-      if (isProjectMode) {
-        const tablesArr = Object.values(tables);
-        const usingProjectApi = !!projectId;
-        setAgentPreviewHistory([]);
-        setAgentRevisionCount(0);
+      const tablesArr = Object.values(tables);
+      const usingProjectApi = !!projectId;
+      setAgentPreviewHistory([]);
+      setAgentRevisionCount(0);
+      setPendingServerPreviewId(null);
+      lastAgentPlanPromptRef.current = prompt;
+      const requestPayload = {
+        mode: "agent_preview" as const,
+        prompt,
+        projectId: usingProjectApi ? projectId : undefined,
+        tablesSample: tablesArr.map((t) => ({
+          name: t.name,
+          sampleRows: t.rows.slice(0, 10)
+        })),
+        modelSource,
+        cloudModelId: modelSource === "cloud" ? cloudModelId : undefined,
+        localModelId: modelSource === "local" ? localModelId : undefined
+      };
+      const agentOpts = {
+        prompt,
+        tables: tablesArr,
+        modelSource,
+        cloudModelId: modelSource === "cloud" ? cloudModelId : undefined,
+        localModelId: modelSource === "local" ? localModelId : undefined,
+        traceId,
+        sessionId: workspaceSessionId ?? undefined,
+        history: chatMessagesToAgentHistory(),
+        appliedPlansSummary,
+        previewLifecycle: true,
+        projectId: usingProjectApi ? projectId : undefined,
+        previewTables: usingProjectApi ? undefined : tablesArr,
+        previewHistory: agentPreviewHistory,
+        revisionCount: agentRevisionCount,
+        signal: takeAgentLlmAbortSignal(),
+        context: buildAgentContextPayload()
+      };
+      const useAgentStream = import.meta.env.VITE_AGENT_USE_STREAM === "true";
+      const agentRes = useAgentStream
+        ? await requestAgentProjectPlanViaStream(agentOpts)
+        : await requestAgentProjectPlan(agentOpts);
+      if (agentRes.kind === "clarification") {
+        receiveAgentClarification(agentRes.clarification, prompt, traceId, "generate");
+        return;
+      }
+      if (agentRes.kind === "plan") {
+        const nextPlan = agentRes.plan;
         setPendingServerPreviewId(null);
-        lastAgentPlanPromptRef.current = prompt;
-        const requestPayload = {
-          mode: "agent_preview" as const,
-          prompt,
-          projectId: usingProjectApi ? projectId : undefined,
-          tablesSample: tablesArr.map((t) => ({
-            name: t.name,
-            sampleRows: t.rows.slice(0, 10)
-          })),
-          modelSource,
-          cloudModelId: modelSource === "cloud" ? cloudModelId : undefined,
-          localModelId: modelSource === "local" ? localModelId : undefined
-        };
-        const agentOpts = {
-          prompt,
-          tables: tablesArr,
-          modelSource,
-          cloudModelId: modelSource === "cloud" ? cloudModelId : undefined,
-          localModelId: modelSource === "local" ? localModelId : undefined,
-          traceId,
-          sessionId: workspaceSessionId ?? undefined,
-          history: chatMessagesToAgentHistory(),
-          appliedPlansSummary,
-          previewLifecycle: true,
-          projectId: usingProjectApi ? projectId : undefined,
-          previewTables: usingProjectApi ? undefined : tablesArr,
-          previewHistory: agentPreviewHistory,
-          revisionCount: agentRevisionCount,
-          signal: takeAgentLlmAbortSignal(),
-          context: buildAgentContextPayload()
-        };
-        const useAgentStream = import.meta.env.VITE_AGENT_USE_STREAM === "true";
-        const agentRes = useAgentStream
-          ? await requestAgentProjectPlanViaStream(agentOpts)
-          : await requestAgentProjectPlan(agentOpts);
-        if (agentRes.kind === "clarification") {
-          receiveAgentClarification(agentRes.clarification, prompt, traceId, "generate");
-          return;
-        }
-        if (agentRes.kind === "plan") {
-          const nextPlan = agentRes.plan;
-          setPendingServerPreviewId(null);
-          setPlan(nextPlan);
-          logInfo("plan_response", {
-            traceId,
-            success: true,
-            stepsCount: nextPlan.steps.length,
-            mode: usingProjectApi ? "project_id_agent" : "project_tables_agent"
-          });
-          const preview = applyProjectPlan(tables, nextPlan);
-          setDiff(preview.diff);
-          setNewTablesPreview(preview.newTables);
-          appendChatMessagesFromPlan(prompt, nextPlan);
-          setConversations((prev) => {
-            const nextId = (prev[0]?.id ?? 0) + 1;
-            const activeModelId = modelSource === "cloud" ? cloudModelId : localModelId;
-            const entry: ConversationEntry = {
-              id: nextId,
-              prompt,
-              payload: requestPayload,
-              plan: nextPlan,
-              diff: preview.diff,
-              createdAt: new Date().toLocaleString(),
-              modelSource,
-              modelId: activeModelId,
-              modelTag: buildModelTag(modelSource, activeModelId)
-            };
-            return [entry, ...prev];
-          });
-          setStatus("Plan generated. Review Diff, then Apply.");
-          return;
-        }
-        if (agentRes.kind === "preview_ready") {
-          const nextPlan = agentRes.plan;
-          const localPreview = applyProjectPlan(tables, nextPlan);
-          setPlan(nextPlan);
-          setDiff(agentRes.preview.diff ?? localPreview.diff);
-          setNewTablesPreview(
-            agentRes.preview.newTables.length > 0
-              ? agentRes.preview.newTables
-              : localPreview.newTables
-          );
-          setAgentPreviewHistory(agentRes.previewHistory);
-          setPendingServerPreviewId(agentRes.preview.id);
-          const st = agentRes.state;
-          const rc = Number(st.revision_count ?? st.revisionCount ?? 0);
-          setAgentRevisionCount(Number.isFinite(rc) ? rc : 0);
-          logInfo("plan_response", {
-            traceId,
-            success: true,
-            stepsCount: nextPlan.steps.length,
-            mode: "agent_preview_ready"
-          });
-          appendChatMessagesFromPlan(prompt, nextPlan);
-          setConversations((prev) => {
-            const nextId = (prev[0]?.id ?? 0) + 1;
-            const activeModelId = modelSource === "cloud" ? cloudModelId : localModelId;
-            const entry: ConversationEntry = {
-              id: nextId,
-              prompt,
-              payload: requestPayload,
-              plan: nextPlan,
-              diff: agentRes.preview.diff,
-              createdAt: new Date().toLocaleString(),
-              modelSource,
-              modelId: activeModelId,
-              modelTag: buildModelTag(modelSource, activeModelId)
-            };
-            return [entry, ...prev];
-          });
-          setStatus(previewReadyStatusMessage(agentRes.warnings));
-          return;
-        }
-        setStatus("Unexpected agent response.");
-      } else {
-        const t = Object.values(tables)[0]!;
-        const requestPayload = {
-          prompt,
-          schema: t.schema,
-          sampleRows: t.rows.slice(0, 10),
-          modelSource,
-          cloudModelId: modelSource === "cloud" ? cloudModelId : undefined,
-          localModelId: modelSource === "local" ? localModelId : undefined
-        };
-        const nextPlan = await requestPlan({
-          prompt: requestPayload.prompt,
-          schema: requestPayload.schema,
-          sampleRows: requestPayload.sampleRows,
-          modelSource: requestPayload.modelSource,
-          cloudModelId: requestPayload.cloudModelId,
-          localModelId: requestPayload.localModelId,
-          traceId
-        });
         setPlan(nextPlan);
         logInfo("plan_response", {
           traceId,
           success: true,
           stepsCount: nextPlan.steps.length,
-          mode: "single_table"
+          mode: usingProjectApi ? "project_id_agent" : "project_tables_agent"
         });
         const preview = applyProjectPlan(tables, nextPlan);
         setDiff(preview.diff);
@@ -1452,7 +1359,50 @@ export default function App() {
           return [entry, ...prev];
         });
         setStatus("Plan generated. Review Diff, then Apply.");
+        return;
       }
+      if (agentRes.kind === "preview_ready") {
+        const nextPlan = agentRes.plan;
+        const localPreview = applyProjectPlan(tables, nextPlan);
+        setPlan(nextPlan);
+        setDiff(agentRes.preview.diff ?? localPreview.diff);
+        setNewTablesPreview(
+          agentRes.preview.newTables.length > 0
+            ? agentRes.preview.newTables
+            : localPreview.newTables
+        );
+        setAgentPreviewHistory(agentRes.previewHistory);
+        setPendingServerPreviewId(agentRes.preview.id);
+        const st = agentRes.state;
+        const rc = Number(st.revision_count ?? st.revisionCount ?? 0);
+        setAgentRevisionCount(Number.isFinite(rc) ? rc : 0);
+        logInfo("plan_response", {
+          traceId,
+          success: true,
+          stepsCount: nextPlan.steps.length,
+          mode: "agent_preview_ready"
+        });
+        appendChatMessagesFromPlan(prompt, nextPlan);
+        setConversations((prev) => {
+          const nextId = (prev[0]?.id ?? 0) + 1;
+          const activeModelId = modelSource === "cloud" ? cloudModelId : localModelId;
+          const entry: ConversationEntry = {
+            id: nextId,
+            prompt,
+            payload: requestPayload,
+            plan: nextPlan,
+            diff: agentRes.preview.diff,
+            createdAt: new Date().toLocaleString(),
+            modelSource,
+            modelId: activeModelId,
+            modelTag: buildModelTag(modelSource, activeModelId)
+          };
+          return [entry, ...prev];
+        });
+        setStatus(previewReadyStatusMessage(agentRes.warnings));
+        return;
+      }
+      setStatus("Unexpected agent response.");
     } catch (e: unknown) {
       const msg = String((e as Error)?.message ?? e);
       const { technical } = splitApiErrorDetail(msg);
