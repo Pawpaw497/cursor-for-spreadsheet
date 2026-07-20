@@ -4,10 +4,12 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import sqlite3
 from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import Request
+from sqlalchemy.exc import OperationalError
 
 from app.config import settings
 from app.logging_config import get_logger, get_trace_id
@@ -169,24 +171,58 @@ def _schedule(coro: Any) -> None:
         threading.Thread(target=_run, daemon=True).start()
 
 
-async def _insert_http_row(**fields: Any) -> None:
+# Bounded retry for lock contention the engine's busy_timeout could not absorb (e.g.
+# SQLITE_BUSY_SNAPSHOT in WAL, which the busy handler does not retry).
+_MAX_INSERT_ATTEMPTS = 6
+_RETRY_BASE_DELAY_S = 0.05
+_RETRY_MAX_DELAY_S = 1.0
+
+
+def _is_sqlite_locked(exc: BaseException) -> bool:
+    """True for SQLite lock contention only; other failures must not be retried."""
+    if not isinstance(exc, (OperationalError, sqlite3.OperationalError)):
+        return False
+    return "locked" in str(exc).lower()
+
+
+async def _insert_with_retry(model: type[Any], /, **fields: Any) -> None:
+    """Insert one audit row, retrying only on SQLite lock contention.
+
+    Each attempt rebuilds both the session and the ORM instance: after a failed commit
+    the session is rolled back and the instance detached, so retrying ``commit()`` on
+    the originals would be a no-op. Non-lock errors and a final exhausted attempt are
+    re-raised for the caller's ``except`` to downgrade to a WARNING -- audit failures
+    must never surface to the business request.
+    """
     factory = audit_db.get_session_factory()
     if factory is None:
         return
-    async with factory() as session:
-        row = audit_db.HttpRequestLog(**fields)
-        session.add(row)
-        await session.commit()
+    for attempt in range(_MAX_INSERT_ATTEMPTS):
+        try:
+            async with factory() as session:
+                session.add(model(**fields))
+                await session.commit()
+            return
+        except Exception as e:
+            if _is_sqlite_locked(e) and attempt < _MAX_INSERT_ATTEMPTS - 1:
+                delay = min(_RETRY_BASE_DELAY_S * (2**attempt), _RETRY_MAX_DELAY_S)
+                log.debug(
+                    "audit insert locked, retrying in %.2fs (attempt %d/%d)",
+                    delay,
+                    attempt + 1,
+                    _MAX_INSERT_ATTEMPTS,
+                )
+                await asyncio.sleep(delay)
+                continue
+            raise
+
+
+async def _insert_http_row(**fields: Any) -> None:
+    await _insert_with_retry(audit_db.HttpRequestLog, **fields)
 
 
 async def _insert_llm_row(**fields: Any) -> None:
-    factory = audit_db.get_session_factory()
-    if factory is None:
-        return
-    async with factory() as session:
-        row = audit_db.LlmCallLog(**fields)
-        session.add(row)
-        await session.commit()
+    await _insert_with_retry(audit_db.LlmCallLog, **fields)
 
 
 async def record_http_request(

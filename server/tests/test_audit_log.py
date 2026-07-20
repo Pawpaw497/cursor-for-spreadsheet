@@ -135,6 +135,183 @@ def test_record_http_and_llm_roundtrip(audit_initialized: Path) -> None:
     asyncio.run(run())
 
 
+def test_audit_engine_configured_for_concurrent_writes(
+    audit_initialized: Path,
+) -> None:
+    """Fast guard on the engine settings the concurrency fixes depend on."""
+    from sqlalchemy import text
+    from sqlalchemy.pool import NullPool
+
+    async def run() -> None:
+        engine = audit_db._engine
+        assert engine is not None
+        assert isinstance(engine.pool, NullPool), (
+            "audit engine must not pool connections across event loops"
+        )
+        async with engine.connect() as conn:
+            journal = (await conn.execute(text("PRAGMA journal_mode"))).scalar()
+            busy = (await conn.execute(text("PRAGMA busy_timeout"))).scalar()
+        assert str(journal).lower() == "wal", f"journal_mode={journal!r}, want wal"
+        assert busy == audit_db._SQLITE_BUSY_TIMEOUT_MS, (
+            f"busy_timeout={busy!r}, want {audit_db._SQLITE_BUSY_TIMEOUT_MS} "
+            "(sqlite3 default 5000 is too low for loaded CI runners)"
+        )
+
+    asyncio.run(run())
+
+
+def test_concurrent_http_and_llm_writes_separate_event_loops(
+    audit_initialized: Path,
+) -> None:
+    """Two event loops writing the same audit file must not silently drop rows.
+
+    Mirrors production: one ``/api/agent`` request writes an HTTP audit row from a
+    background thread (``_schedule`` has no running loop -> ``asyncio.run``) while the
+    ``pa_turn`` LLM audit row is written on the app loop. Both share the global engine
+    and land in the same SQLite file. ``record_*`` swallows failures with a WARNING, so
+    contention shows up as *missing rows*, never as an exception -- hence the assertion
+    is a row count.
+
+    Scope note: this is an *invariant guard*, not a reproducer. It passes against the
+    pre-fix engine config too, because sqlite3's default 5s busy timeout absorbs the
+    contention on a fast disk (it does catch cross-event-loop connection reuse, which
+    would raise "Future attached to a different loop"). The deterministic reproducer
+    for the observed CI failure is
+    ``test_audit_write_survives_write_lock_held_past_default_budget`` below.
+    """
+    import threading
+
+    trace = "trace-concurrent-write"
+    rows_per_side = 25
+    barrier = threading.Barrier(2)
+    errors: list[BaseException] = []
+
+    async def _write_http() -> None:
+        for i in range(rows_per_side):
+            await audit_mod.record_http_request(
+                trace_id=trace,
+                method="POST",
+                path="/api/agent",
+                request_body={"prompt": f"concurrent-{i}"},
+                response_status=200,
+                duration_ms=1.0,
+                request_kind="agent",
+            )
+
+    async def _write_llm() -> None:
+        for i in range(rows_per_side):
+            await audit_mod.record_llm_call(
+                trace_id=trace,
+                call_kind="pa_turn",
+                model_source="cloud",
+                model="test/model",
+                duration_ms=1.0,
+                messages=[{"role": "user", "content": f"concurrent-{i}"}],
+            )
+
+    def _run(coro_factory) -> None:
+        try:
+            barrier.wait(timeout=10.0)
+            asyncio.run(coro_factory())
+        except BaseException as e:  # surfaced after join for a readable failure
+            errors.append(e)
+
+    threads = [
+        threading.Thread(target=_run, args=(_write_http,)),
+        threading.Thread(target=_run, args=(_write_llm,)),
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=60.0)
+        assert not t.is_alive(), "concurrent audit write timed out"
+
+    assert not errors, f"audit writer thread raised: {errors!r}"
+
+    async def check() -> None:
+        http = await _http_rows(trace)
+        llm = await _llm_rows(trace)
+        assert len(http) == rows_per_side, (
+            f"HTTP audit rows dropped under concurrency: "
+            f"{len(http)}/{rows_per_side} persisted"
+        )
+        assert len(llm) == rows_per_side, (
+            f"LLM audit rows dropped under concurrency: "
+            f"{len(llm)}/{rows_per_side} persisted"
+        )
+
+    asyncio.run(check())
+
+
+def test_audit_write_survives_write_lock_held_past_default_budget(
+    audit_initialized: Path,
+) -> None:
+    """An audit row must survive a write lock held longer than sqlite3's 5s default.
+
+    Deterministic reproducer for the PR #39 CI failure. sqlite3.connect defaults to
+    ``timeout=5.0`` (busy_timeout=5000), so the pre-fix engine tolerates only ~5s of
+    contention; on a loaded CI runner the DELETE-journal write window exceeded that and
+    ``record_http_request`` swallowed ``database is locked`` into a WARNING, dropping
+    the row while the business request still returned 200.
+
+    Holding an EXCLUSIVE write lock for ``hold_s`` (> 5s default, < 30s configured)
+    pins that behavioural difference: pre-fix the row is silently dropped, post-fix the
+    write waits out the lock and persists.
+    """
+    import sqlite3
+    import threading
+    import time
+
+    hold_s = 6.5
+    trace = "trace-lock-held"
+    lock_acquired = threading.Event()
+    holder_error: list[BaseException] = []
+
+    def _hold_write_lock() -> None:
+        try:
+            conn = sqlite3.connect(str(audit_initialized), timeout=1.0)
+            try:
+                conn.execute("BEGIN EXCLUSIVE")
+                lock_acquired.set()
+                time.sleep(hold_s)
+                conn.rollback()
+            finally:
+                conn.close()
+        except BaseException as e:
+            holder_error.append(e)
+            lock_acquired.set()
+
+    holder = threading.Thread(target=_hold_write_lock)
+    holder.start()
+    try:
+        assert lock_acquired.wait(timeout=10.0), "could not acquire exclusive lock"
+        assert not holder_error, f"lock holder failed: {holder_error!r}"
+
+        async def run() -> None:
+            await audit_mod.record_http_request(
+                trace_id=trace,
+                method="POST",
+                path="/api/agent",
+                response_status=200,
+                duration_ms=1.0,
+                request_kind="agent",
+            )
+
+        asyncio.run(run())
+    finally:
+        holder.join(timeout=30.0)
+        assert not holder.is_alive(), "lock holder thread did not finish"
+
+    async def check() -> None:
+        rows = await _http_rows(trace)
+        assert len(rows) == 1, (
+            "audit row silently dropped while a write lock was held past the default "
+            f"5s busy timeout: {len(rows)}/1 persisted"
+        )
+
+    asyncio.run(check())
+
+
 def test_workspace_key_stored_as_hash_only() -> None:
     raw = "workspace:file:abc123"
     hashed = audit_mod.workspace_key_hash(raw)

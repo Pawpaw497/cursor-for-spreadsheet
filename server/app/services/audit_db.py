@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from sqlalchemy import Float, Integer, String, Text, text
+from sqlalchemy import Float, Integer, String, Text, event, text
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.pool import NullPool
 
 from app.config import settings
 from app.logging_config import get_logger
@@ -21,6 +22,12 @@ _SERVER_ROOT = Path(__file__).resolve().parents[2]
 
 _engine: AsyncEngine | None = None
 _session_factory: async_sessionmaker[AsyncSession] | None = None
+
+# sqlite3 defaults to timeout=5.0 (busy_timeout=5000); a loaded CI runner exceeded that
+# while the HTTP and pa_turn audit writes contended, and the row was silently dropped.
+# Align with data_store.py's 30s budget.
+_SQLITE_CONNECT_TIMEOUT_S = 30.0
+_SQLITE_BUSY_TIMEOUT_MS = int(_SQLITE_CONNECT_TIMEOUT_S * 1000)
 
 
 class Base(DeclarativeBase):
@@ -128,7 +135,28 @@ async def init_audit_db() -> None:
     _engine = create_async_engine(
         audit_sqlite_url(),
         echo=False,
+        connect_args={"timeout": _SQLITE_CONNECT_TIMEOUT_S},
+        # Audit writes come from two event loops: the app loop (pa_turn LLM rows) and
+        # short-lived loops in background threads (`audit_log._schedule` falls back to
+        # `asyncio.run` when no loop is running). A pooled connection created on one
+        # loop must never be handed to another -- that raises "Future attached to a
+        # different loop", which WAL/busy_timeout/retry cannot recover from. NullPool
+        # gives every session its own connection bound to the current loop; the cost is
+        # acceptable for fire-and-forget single-row inserts.
+        poolclass=NullPool,
     )
+
+    @event.listens_for(_engine.sync_engine, "connect")
+    def _configure_sqlite(dbapi_conn, _record) -> None:  # type: ignore[no-untyped-def]
+        # busy_timeout is per-connection, so it must be set on every connect rather
+        # than once at init. WAL shortens the window writers block each other for.
+        cursor = dbapi_conn.cursor()
+        try:
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.execute(f"PRAGMA busy_timeout={_SQLITE_BUSY_TIMEOUT_MS}")
+        finally:
+            cursor.close()
+
     _session_factory = async_sessionmaker(_engine, expire_on_commit=False)
     async with _engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
