@@ -163,6 +163,11 @@ def test_middleware_records_agent_request(
     turn = PaTurnResult(tool_parts=[], text="", structured_plan=plan)
 
     monkeypatch.setattr("app.main.schedule_record_http_request", _schedule_audit_sync)
+    # 本测试只验证中间件 HTTP 审计；关掉 pa_turn 的 LLM 审计写，
+    # 避免它与同步写线程在同一 SQLite 文件上并发导致 database-is-locked（CI 慢盘可复现）。
+    monkeypatch.setattr(
+        "app.agent.pa_decision._schedule_pa_turn_audit", lambda **_kwargs: None
+    )
 
     body = {
         "prompt": "add column",
