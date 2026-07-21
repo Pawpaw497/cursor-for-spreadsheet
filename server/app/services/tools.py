@@ -160,6 +160,82 @@ def validate_expression(
         return json.dumps({"ok": False, "error": str(e)})
 
 
+MAX_PEEK_ROWS = 200
+
+
+@_register("peek_range")
+def peek_range(
+    tables: List[TableContext],
+    table_name: str,
+    start_row: int = 0,
+    end_row: int = 10,
+    columns: list[str] | None = None,
+    filter_expr: str | None = None,
+) -> str:
+    """
+    Read a bounded slice of rows from the store (0-based half-open [start, end)).
+    filter_expr applies only within the read window, not the whole table.
+    """
+    from app.services.data_store import TableNotFoundError, get_data_store
+    from app.services.peek_filter import apply_filter, schema_column_names
+
+    t = next((x for x in tables if x.name == table_name), None)
+    if not t:
+        return json.dumps({"error": f"Table not found: {table_name!r}"})
+    if not t.table_id:
+        return json.dumps(
+            {
+                "error": (
+                    f"No tableRef for table {t.name!r}; "
+                    "upload rows before agent request"
+                ),
+            }
+        )
+
+    try:
+        row_count = get_data_store().get_row_count(t.table_id)
+    except TableNotFoundError:
+        return json.dumps(
+            {"error": f"Table not found in store: {t.table_id}"}
+        )
+
+    start = max(0, start_row)
+    truncated = end_row > start + MAX_PEEK_ROWS
+    end_eff = min(end_row, start + MAX_PEEK_ROWS, row_count)
+
+    if start >= end_eff:
+        rows: list[dict[str, Any]] = []
+    else:
+        rows = get_data_store().read_rows(t.table_id, start, end_eff)
+
+    col_names = schema_column_names(t.schema)
+    allowed = set(col_names)
+
+    if columns is not None:
+        unknown = [c for c in columns if c not in allowed]
+        if unknown:
+            return json.dumps(
+                {"error": f"Unknown column(s): {', '.join(unknown)!r}"}
+            )
+
+    if filter_expr:
+        rows, ferr = apply_filter(rows, filter_expr, allowed)
+        if ferr:
+            return json.dumps({"error": ferr})
+
+    if columns is not None:
+        rows = [{k: r.get(k) for k in columns} for r in rows]
+
+    return json.dumps(
+        {
+            "rows": rows,
+            "truncated": truncated,
+            "row_count": row_count,
+        },
+        ensure_ascii=False,
+    )
+
+
 @_register("execute_step")
 def execute_step(
     tables: List[TableContext],

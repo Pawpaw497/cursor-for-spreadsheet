@@ -60,6 +60,29 @@ class RollbackLastStepArgs(BaseModel):
     """No parameters."""
 
 
+class PeekRangeArgs(BaseModel):
+    table_name: str = Field(description="Table name.")
+    start_row: int = Field(
+        default=0,
+        description="0-based start row (inclusive).",
+    )
+    end_row: int = Field(
+        default=10,
+        description="0-based end row (exclusive).",
+    )
+    columns: list[str] | None = Field(
+        default=None,
+        description="Optional column names to project; omit for all schema columns.",
+    )
+    filter_expr: str | None = Field(
+        default=None,
+        description=(
+            "Optional filter DSL applied only within the requested row range "
+            "(not a whole-table WHERE)."
+        ),
+    )
+
+
 class AskUserArgs(BaseModel):
     question: str = Field(description="Short clarification question for the user.")
     options: list[str] | None = Field(
@@ -94,10 +117,23 @@ PA_TOOL_DEFINITIONS: tuple[PaToolDefinition, ...] = (
     PaToolDefinition(
         name="get_column_stats",
         description=(
-            "Get simple stats for a column (count, distinct, min/max if numeric) "
-            "from full table data in the store."
+            "Column-level stats (count, distinct, min/max when numeric). "
+            "When the conversation already includes a Data profile, prefer that "
+            "for column statistics; use this tool as a per-column supplement or "
+            "fallback."
         ),
         args_model=GetColumnStatsArgs,
+    ),
+    PaToolDefinition(
+        name="peek_range",
+        description=(
+            "Read up to 200 rows from the store for a table (0-based half-open "
+            "row range). Prefer the Data profile in context for column "
+            "statistics; use peek_range only when you need actual cell values. "
+            "filter_expr filters only within the requested row range, not the "
+            "whole table — page through ranges to scan more."
+        ),
+        args_model=PeekRangeArgs,
     ),
     PaToolDefinition(
         name="validate_expression",
@@ -197,6 +233,27 @@ def register_pa_agent_tools(agent: Agent[PaAgentDeps, Any]) -> None:
             ctx,
             "get_column_stats",
             GetColumnStatsArgs(table_name=table_name, column=column),
+        )
+
+    @agent.tool(description=_tool_description("peek_range"))
+    async def peek_range_tool(
+        ctx: RunContext[PaAgentDeps],
+        table_name: str,
+        start_row: int = 0,
+        end_row: int = 10,
+        columns: list[str] | None = None,
+        filter_expr: str | None = None,
+    ) -> str:
+        return _run_tool_from_args(
+            ctx,
+            "peek_range",
+            PeekRangeArgs(
+                table_name=table_name,
+                start_row=start_row,
+                end_row=end_row,
+                columns=columns,
+                filter_expr=filter_expr,
+            ),
         )
 
     @agent.tool(description=_tool_description("validate_expression"))

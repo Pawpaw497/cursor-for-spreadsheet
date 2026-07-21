@@ -208,6 +208,18 @@ class DataStore:
 
             return [json.loads(record["row_json"]) for record in row_records]
 
+    def get_row_count(self, table_id: str) -> int:
+        """Lightweight row count without loading row payloads."""
+        self._ensure_initialized()
+        with self._connect() as conn:
+            meta = conn.execute(
+                "SELECT row_count FROM tables WHERE id = ?",
+                (table_id,),
+            ).fetchone()
+            if meta is None:
+                raise TableNotFoundError(table_id)
+            return int(meta["row_count"])
+
     def sweep_expired(self, ttl_hours: int | None = None) -> int:
         self._ensure_initialized()
         hours = ttl_hours if ttl_hours is not None else settings.TABLE_TTL_HOURS
