@@ -132,6 +132,55 @@ def test_schema_name_fallback_when_no_key() -> None:
     assert p.columns[0].count == 1
 
 
+def test_single_row_table_profile() -> None:
+    """M4 缺口：单行表 — numeric std=0.0（总体标准差 n=1），string top_values 单条。"""
+    rows = [{"a": 42, "b": "hello"}]
+    p = build_table_profile("T", [{"key": "a"}, {"key": "b"}], rows)
+    assert p.total_row_count == 1
+    assert p.profile_sampled is False
+
+    a = _col(p, "a")
+    assert a.inferred_type == "numeric"
+    assert a.count == 1
+    assert a.mean == pytest.approx(42.0)
+    assert a.std == 0.0
+    assert a.min_val == "42" and a.max_val == "42"
+
+    b = _col(p, "b")
+    assert b.inferred_type == "string"
+    assert b.distinct_count == 1
+    assert b.top_values == [("hello", 1)]
+
+
+def test_duplicate_column_names_in_schema() -> None:
+    """M4 缺口：schema 中重复列名不 crash — 按 schema 顺序各产一个 profile，取同一 row key。
+
+    两列共享同一 row key「a」，统计口径相同，故 model_dump() 应相等（产品语义：重复 schema 项
+    是对同一物理列的重复描述，而非两列独立数据源）。
+    """
+    rows = [{"a": 1}, {"a": 2}]
+    p = build_table_profile("T", [{"key": "a"}, {"key": "a"}], rows)
+    assert p.col_count == 2
+    assert [c.name for c in p.columns] == ["a", "a"]
+    assert all(c.inferred_type == "numeric" and c.count == 2 for c in p.columns)
+    assert p.columns[0].model_dump() == p.columns[1].model_dump()
+
+
+def test_full_stats_below_sampling_threshold_large_rows() -> None:
+    """M4 缺口：>1000 行且低于采样阈值 — distinct/top_values 基于全量而非前缀。"""
+    rows = [{"a": f"v{i % 7}"} for i in range(1500)]
+    p = build_table_profile("T", [{"key": "a"}], rows)
+    assert p.total_row_count == 1500
+    assert p.profile_sampled is False
+    col = _col(p, "a")
+    assert col.count == 1500
+    assert col.distinct_count == 7
+    # 1500 = 7*214 + 2 → v0/v1 各 215，其余 214；确定性排序取前 5
+    assert col.top_values[0] == ("v0", 215)
+    assert col.top_values[1] == ("v1", 215)
+    assert len(col.top_values) == 5
+
+
 def test_sampling_over_threshold(monkeypatch: pytest.MonkeyPatch) -> None:
     import app.agent.sub_agents.profile_builder as pb
 
