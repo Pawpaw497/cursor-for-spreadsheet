@@ -64,6 +64,20 @@ def test_read_rows_missing_raises(store: DataStore) -> None:
         store.read_rows("missing-id", 0, 1)
 
 
+def test_get_row_count(store: DataStore) -> None:
+    table_id = store.create_table(
+        name="t",
+        schema=[{"key": "a"}],
+        rows=[{"a": 1}, {"a": 2}],
+    )
+    assert store.get_row_count(table_id) == 2
+
+
+def test_get_row_count_missing_raises(store: DataStore) -> None:
+    with pytest.raises(TableNotFoundError):
+        store.get_row_count("missing-id")
+
+
 def test_create_table_rolls_back_on_serialization_failure(store: DataStore) -> None:
     bad_rows = [{"ok": 1}, {"bad": object()}]
     with pytest.raises(TypeError):

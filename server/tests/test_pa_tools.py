@@ -46,6 +46,7 @@ def test_openai_required_fields_match_legacy_contract() -> None:
         for s in build_openai_tools_spec()
     }
     assert by_name["get_column_stats"]["required"] == ["table_name", "column"]
+    assert by_name["peek_range"]["required"] == ["table_name"]
     assert by_name["validate_expression"]["required"] == ["expression"]
     assert by_name["execute_step"]["required"] == ["step"]
     assert "table_name" in by_name["get_schema"].get("properties", {})
@@ -63,6 +64,13 @@ def test_run_tool_from_args_invokes_run_tool() -> None:
     m_run.assert_called_once()
     assert m_run.call_args[0][0] == "get_schema"
     assert m_run.call_args[0][1] == {"table_name": "Sheet1"}
+
+
+def test_peek_range_description_mentions_window_filter() -> None:
+    spec = next(s for s in build_openai_tools_spec() if s["function"]["name"] == "peek_range")
+    desc = spec["function"]["description"].lower()
+    assert "data profile" in desc or "profile" in desc
+    assert "row range" in desc or "requested row" in desc
 
 
 def test_tool_names_exclude_get_sample_rows() -> None:
