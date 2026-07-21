@@ -236,7 +236,7 @@ def register_pa_agent_tools(agent: Agent[PaAgentDeps, Any]) -> None:
         )
 
     @agent.tool(description=_tool_description("peek_range"))
-    async def peek_range_tool(
+    async def peek_range(
         ctx: RunContext[PaAgentDeps],
         table_name: str,
         start_row: int = 0,

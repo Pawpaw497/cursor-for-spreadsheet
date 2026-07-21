@@ -182,6 +182,26 @@ def test_multiple_tables_profiled_into_one_message(store) -> None:
     assert '"A"' in profile_msgs[0]["content"] and '"B"' in profile_msgs[0]["content"]
 
 
+def test_single_row_table_profile_message_shows_real_count(store) -> None:
+    """M4 缺口：单行表 → Data profile 文本含真实行数 1，非 sample 口径。"""
+    tid = store.create_table("Sheet1", SCHEMA, ROWS[:1])
+    out = analyze_context(_state(tid, [dict(SCHEMA_MSG)]))
+    assert out.data_context is not None
+    assert out.data_context.tables[0].total_row_count == 1
+    profile_msg = next(m for m in out.messages if is_data_profile_message(m))
+    assert "(1 rows, 2 columns)" in profile_msg["content"]
+
+
+def test_state_serialization_has_no_inline_rows(store) -> None:
+    """M4 缺口：AgentState/TableContext 序列化不含全表行 — 仅 table_id 引用。"""
+    tid = store.create_table("Sheet1", SCHEMA, ROWS)
+    out = analyze_context(_state(tid, [dict(SCHEMA_MSG)]))
+    dumped = out.model_dump()
+    table_keys = set(dumped["tables"][0].keys())
+    assert "table_id" in table_keys
+    assert not table_keys & {"rows", "full_rows", "sample_rows", "sampleRows"}
+
+
 def test_node_context_graph_roundtrip_preserves_data_context(store) -> None:
     """经 orchestrator _node_context 的 model_dump/model_validate 往返后 data_context 完好。"""
     from app.agent.orchestrator import _node_context

@@ -4,12 +4,17 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from pydantic_ai import Agent
+
 from app.agent.pa_tools import (
+    ASK_USER_TOOL_NAME,
     GetColumnStatsArgs,
     GetSchemaArgs,
     PA_TOOL_DEFINITIONS,
+    PaAgentDeps,
     _run_tool_from_args,
     build_openai_tools_spec,
+    register_pa_agent_tools,
     tool_names,
 )
 from app.models.agent_models import TableContext
@@ -75,6 +80,26 @@ def test_peek_range_description_mentions_window_filter() -> None:
 
 def test_tool_names_exclude_get_sample_rows() -> None:
     assert "get_sample_rows" not in tool_names()
+
+
+def test_register_pa_agent_tools_names_match_definitions() -> None:
+    """Regression for PR #42: pydantic-ai's @agent.tool registers each tool under
+    the decorated function's __name__, a source of truth independent of
+    PA_TOOL_DEFINITIONS/tool_names(). A mismatch there (peek_range_tool vs
+    peek_range) let a live model be told about a tool name PA's own registry
+    didn't expose. ask_user is excluded: it isn't a dynamic @agent.tool call,
+    it's handled via the structured final_result output path (see
+    ASK_USER_TOOL_NAME usage in pa_decision.py).
+
+    Relies on pydantic-ai's private _function_toolset — no public introspection
+    API exists for this. If a pydantic-ai upgrade removes/renames it, this test
+    will error rather than silently stop guarding the invariant.
+    """
+    agent = Agent("test", deps_type=PaAgentDeps)
+    register_pa_agent_tools(agent)
+    registered = set(agent._function_toolset.tools.keys())
+    expected = set(tool_names()) - {ASK_USER_TOOL_NAME}
+    assert registered == expected
 
 
 def test_get_column_stats_model_requires_fields() -> None:

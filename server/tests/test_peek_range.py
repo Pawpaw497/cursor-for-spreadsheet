@@ -50,6 +50,30 @@ def test_happy_path_range_read(data_store: DataStore) -> None:
     assert out["rows"][0]["amount"] == 5
 
 
+def test_run_tool_dispatch_with_data_context_returns_raw_rows(
+    data_store: DataStore,
+) -> None:
+    """M4 缺口：state 有 DataContext 时 peek_range 经 run_tool 仍从 store 读原始行。"""
+    from app.models.table_models import DataContext, TableProfile
+    from app.services.tools import run_tool
+
+    rows = [{"amount": i, "label": f"r{i}"} for i in range(5)]
+    table_id = data_store.create_table(name="Sheet1", schema=_tables(None)[0].schema, rows=rows)
+    dc = DataContext(
+        tables=[TableProfile(table_name="Sheet1", total_row_count=5, col_count=2, columns=[])]
+    )
+    out = _load(
+        run_tool(
+            "peek_range",
+            {"table_name": "Sheet1", "start_row": 1, "end_row": 3},
+            _tables(table_id),
+            data_context=dc,
+        )
+    )
+    assert out["row_count"] == 5
+    assert [r["amount"] for r in out["rows"]] == [1, 2]
+
+
 def test_out_of_range_empty_rows(data_store: DataStore) -> None:
     table_id = data_store.create_table(
         name="Sheet1",
