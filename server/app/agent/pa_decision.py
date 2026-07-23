@@ -54,6 +54,8 @@ log = get_logger("agent.pa_decision")
 
 _PA_TURN_TIMEOUT_S = OPENROUTER_HTTP_TIMEOUT_TOOLS_S + 60.0  # 90s HTTP + 60s buffer
 
+MAX_PLAN_VALIDATION_RETRIES = 2
+
 
 @dataclass(frozen=True, slots=True)
 class PaTurnResult:
@@ -109,6 +111,28 @@ def _truncate_for_log(text: str, limit: int = 200) -> str:
     return text
 
 
+def _summarize_plan_validation_error(err: str) -> str:
+    """Turn a raw ``final_result`` validation error into retry feedback for the model.
+
+    Known malformations (e.g. null ``steps`` elements) get a targeted, actionable
+    summary; anything else falls back to a truncated raw pydantic error so the
+    model still sees *something* concrete to react to.
+    """
+    if "steps" in err and "input_value=None" in err:
+        return (
+            "Your last final_result call had steps entries that were null. "
+            "steps items MUST be actual step objects, never null and never a "
+            'JSON string — e.g. {"action": "add_column", "name": "...", '
+            '"expression": "..."}. Re-emit final_result with real step objects '
+            "for every entry."
+        )
+    return (
+        "Your last final_result call failed validation: "
+        f"{_truncate_for_log(err, limit=600)} "
+        "Re-emit final_result with a valid Plan matching the tool schema."
+    )
+
+
 def _pa_audit_messages(
     history: list[Any],
     user_prompt: str | None,
@@ -121,7 +145,9 @@ def _pa_audit_messages(
     return prepare_messages_for_log(msgs)
 
 
-def _pa_turn_result_payload(turn: PaTurnResult) -> dict[str, Any]:
+def _pa_turn_result_payload(
+    turn: PaTurnResult, *, plan_validation_retry: int = 0
+) -> dict[str, Any]:
     payload: dict[str, Any] = {}
     if turn.text.strip():
         payload.update(build_result_payload(content=turn.text))
@@ -137,6 +163,8 @@ def _pa_turn_result_payload(turn: PaTurnResult) -> dict[str, Any]:
         ]
     if turn.final_result_error:
         payload["final_result_error"] = turn.final_result_error
+    if plan_validation_retry:
+        payload["plan_validation_retry"] = plan_validation_retry
     return payload or {"status": "ok"}
 
 
@@ -178,7 +206,7 @@ def partition_tool_calls(
             except Exception as e:
                 log.warning("pa_decision final_result validation failed err=%s", e)
                 if plan is None:
-                    final_result_error = _truncate_for_log(str(e))
+                    final_result_error = _truncate_for_log(str(e), limit=600)
         else:
             regular.append(part)
     if plan is not None:
@@ -370,6 +398,8 @@ async def pa_decision_step(
     state: AgentState,
     *,
     use_tools: bool = True,
+    plan_validation_retries: int = 0,
+    last_plan_validation_error: str | None = None,
 ) -> tuple[AgentState, AgentAction]:
     """PA-backed single ReAct step for LangGraph ``llm_decide`` and SSE."""
     if state.current_turn >= state.max_turns:
@@ -412,7 +442,9 @@ async def pa_decision_step(
         state=state,
         duration_ms=(time.perf_counter() - t0) * 1000,
         messages=audit_messages,
-        result=_pa_turn_result_payload(turn),
+        result=_pa_turn_result_payload(
+            turn, plan_validation_retry=plan_validation_retries
+        ),
     )
 
     if turn.tool_parts:
@@ -496,5 +528,21 @@ async def pa_decision_step(
                 )
             ),
         )
+
+    if turn.final_result_error:
+        can_retry = (
+            plan_validation_retries < MAX_PLAN_VALIDATION_RETRIES
+            and turn.final_result_error != last_plan_validation_error
+            and state.current_turn + 1 < state.max_turns
+        )
+        if can_retry:
+            feedback = _summarize_plan_validation_error(turn.final_result_error)
+            retry_state = state_with_user_feedback(state, feedback)
+            return await pa_decision_step(
+                retry_state,
+                use_tools=use_tools,
+                plan_validation_retries=plan_validation_retries + 1,
+                last_plan_validation_error=turn.final_result_error,
+            )
 
     return await _finish_terminal_turn(state, turn)
