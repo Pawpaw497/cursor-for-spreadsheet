@@ -114,3 +114,46 @@ def test_render_multiple_tables() -> None:
     tp2 = TableProfile(table_name="B", total_row_count=2, col_count=0)
     text = build_data_context_text(DataContext(tables=[tp, tp2]))
     assert '"A"' in text and '"B"' in text
+
+
+def test_render_topic_description_granularity_all_present() -> None:
+    dc = DataContext(
+        tables=[
+            TableProfile(
+                table_name="Sheet1",
+                total_row_count=3,
+                col_count=0,
+                topic="订单",
+                description="每行一笔订单",
+                granularity="每行=一笔订单",
+            )
+        ]
+    )
+    text = build_data_context_text(dc)
+    assert "topic: 订单" in text
+    assert "description: 每行一笔订单" in text
+    assert "granularity: 每行=一笔订单" in text
+
+
+def test_render_partial_intent_fields_only_shows_present_ones() -> None:
+    dc = DataContext(
+        tables=[
+            TableProfile(
+                table_name="Sheet1", total_row_count=3, col_count=0, topic="订单"
+            )
+        ]
+    )
+    text = build_data_context_text(dc)
+    assert "topic: 订单" in text
+    assert "description:" not in text
+    assert "granularity:" not in text
+
+
+def test_render_no_intent_fields_adds_no_extra_line() -> None:
+    dc = DataContext(
+        tables=[TableProfile(table_name="Sheet1", total_row_count=3, col_count=0)]
+    )
+    text = build_data_context_text(dc)
+    assert "topic:" not in text
+    assert "description:" not in text
+    assert "granularity:" not in text
