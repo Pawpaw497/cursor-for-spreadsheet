@@ -5,10 +5,15 @@ import asyncio
 import json
 from unittest.mock import patch
 
-from pydantic_ai.messages import ToolCallPart
+from pydantic_ai.messages import ModelRequest, ToolCallPart, UserPromptPart
 
 from app.agent.actions import AskClarificationAction, FinishAction, OutputPlanAction
-from app.agent.pa_decision import PaTurnResult, pa_decision_step, partition_tool_calls
+from app.agent.pa_decision import (
+    MAX_PLAN_VALIDATION_RETRIES,
+    PaTurnResult,
+    pa_decision_step,
+    partition_tool_calls,
+)
 from app.agent.pa_tools import PA_OUTPUT_TOOL_NAME
 from app.models.agent_models import AgentState, TableContext
 from app.models.plan import Plan
@@ -219,3 +224,128 @@ def test_partition_tool_calls_unparseable_step_still_errors() -> None:
     )
     assert parsed is None
     assert err is not None
+
+
+def test_partition_tool_calls_all_null_steps() -> None:
+    """openrouter/auto 实测畸形：intent 完好，steps 全为 null（无法宽容解析）。"""
+    _, parsed, err = partition_tool_calls(
+        [
+            ToolCallPart(
+                tool_name=PA_OUTPUT_TOOL_NAME,
+                args={
+                    "intent": "filter and sort by amount",
+                    "steps": [None, None, None, None, None],
+                },
+                tool_call_id="out1",
+            ),
+        ]
+    )
+    assert parsed is None
+    assert err is not None
+    assert "None" in err
+
+
+def _null_steps_turn() -> PaTurnResult:
+    _, _, err = partition_tool_calls(
+        [
+            ToolCallPart(
+                tool_name=PA_OUTPUT_TOOL_NAME,
+                args={"intent": "x", "steps": [None] * 5},
+                tool_call_id="out1",
+            ),
+        ]
+    )
+    assert err is not None
+    return PaTurnResult(tool_parts=[], text="", structured_plan=None, final_result_error=err)
+
+
+def test_pa_decision_retries_on_plan_validation_error_then_succeeds() -> None:
+    state = _state()
+    bad_turn = _null_steps_turn()
+    good_turn = PaTurnResult(tool_parts=[], text="", structured_plan=_plan())
+
+    async def run() -> None:
+        with patch(
+            "app.agent.pa_decision._run_pa_single_turn",
+            side_effect=[bad_turn, good_turn],
+        ) as mock_run:
+            _, action = await pa_decision_step(state, use_tools=True)
+        assert isinstance(action, OutputPlanAction)
+        assert mock_run.call_count == 2
+
+        second_history = mock_run.call_args_list[1].kwargs["message_history"]
+        assert second_history, "feedback message must be threaded into retry history"
+        last_msg = second_history[-1]
+        assert isinstance(last_msg, ModelRequest)
+        assert any(
+            isinstance(p, UserPromptPart) and "steps" in str(p.content)
+            for p in last_msg.parts
+        )
+
+    asyncio.run(run())
+
+
+def test_pa_decision_retry_exhausted_finishes_with_plan_validation_failed() -> None:
+    state = _state()
+    bad_turns = [
+        PaTurnResult(
+            tool_parts=[],
+            text="",
+            structured_plan=None,
+            final_result_error=f"distinct error #{i}",
+        )
+        for i in range(1 + MAX_PLAN_VALIDATION_RETRIES)
+    ]
+
+    async def run() -> None:
+        with patch(
+            "app.agent.pa_decision._run_pa_single_turn",
+            side_effect=bad_turns,
+        ) as mock_run:
+            _, action = await pa_decision_step(state, use_tools=True)
+        assert isinstance(action, FinishAction)
+        assert action.payload
+        assert "plan_validation_failed" in (action.payload.reason or "")
+        assert mock_run.call_count == 1 + MAX_PLAN_VALIDATION_RETRIES
+
+    asyncio.run(run())
+
+
+def test_pa_decision_retry_short_circuits_on_repeated_error() -> None:
+    state = _state()
+    bad_turn = PaTurnResult(
+        tool_parts=[],
+        text="",
+        structured_plan=None,
+        final_result_error="same error every time",
+    )
+
+    async def run() -> None:
+        with patch(
+            "app.agent.pa_decision._run_pa_single_turn",
+            side_effect=[bad_turn, bad_turn, bad_turn],
+        ) as mock_run:
+            _, action = await pa_decision_step(state, use_tools=True)
+        assert isinstance(action, FinishAction)
+        # Retries once (new turn), then short-circuits on seeing the identical error again.
+        assert mock_run.call_count == 2
+
+    asyncio.run(run())
+
+
+def test_pa_decision_retry_respects_max_turns_boundary() -> None:
+    state = _state()
+    state = state.model_copy(update={"current_turn": state.max_turns - 1})
+    bad_turn = _null_steps_turn()
+
+    async def run() -> None:
+        with patch(
+            "app.agent.pa_decision._run_pa_single_turn",
+            return_value=bad_turn,
+        ) as mock_run:
+            _, action = await pa_decision_step(state, use_tools=True)
+        assert isinstance(action, FinishAction)
+        assert "plan_validation_failed" in (action.payload.reason or "")
+        assert mock_run.call_count == 1
+
+    asyncio.run(run())
