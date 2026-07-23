@@ -35,3 +35,18 @@ class TableProfile(BaseModel):
 
 class DataContext(BaseModel):
     tables: list[TableProfile] = Field(default_factory=list)
+
+
+class TableIntent(BaseModel):
+    """intent_analyzer 单表分类结果：回填 TableProfile.topic/description/granularity。"""
+
+    table_name: str
+    topic: Optional[str] = None
+    description: Optional[str] = None
+    granularity: Optional[str] = None
+
+
+class TableIntentBatch(BaseModel):
+    """intent_analyzer 批量分类的结构化输出（pydantic-ai result_type）。"""
+
+    tables: list[TableIntent] = Field(default_factory=list)

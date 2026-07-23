@@ -105,10 +105,10 @@ def _node_context(s: AgentGraphState) -> AgentGraphState:
     return {"agent": out.model_dump(), "scratch": dict(s.get("scratch") or {})}
 
 
-def _node_intent(s: AgentGraphState) -> AgentGraphState:
-    """intent_analyzer：当前为透传。"""
+async def _node_intent(s: AgentGraphState) -> AgentGraphState:
+    """intent_analyzer：批量分类回填语义字段并刷新 Data profile 消息。"""
     agent = AgentState.model_validate(s["agent"])
-    out = analyze_intent(agent)
+    out = await analyze_intent(agent)
     return {"agent": out.model_dump(), "scratch": dict(s.get("scratch") or {})}
 
 
