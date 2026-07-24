@@ -18,6 +18,7 @@
 - **单表计划**（`/api/plan`）：列级与行级步骤与 [`plan-step-types-reference.md`](plan-step-types-reference.md) 一致；`add_column` 表达式支持 `row => body` 形式，Apply 前后端统一 strip。
 - **多表计划**（`/api/plan-project`）：`join_tables`、`create_table`、`aggregate_table`、`union_tables`、`lookup_column` 等。
 - **Agent 模式**（`/api/agent`、`/api/agent-stream`）：Pydantic AI + LangGraph 多轮工具调用；可返回 `plan`、`clarification`、`preview_ready` 或错误。
+- **表语义画像（intent analyzer）**：context analyzer 算出列级统计后，intent analyzer 批量调用 LLM 为每张表回填 `topic`/`description`/`granularity`（一次调用覆盖当前会话全部表，按表结构签名做进程内缓存、失败时静默保留为空），用于增强 Agent 对多表意图的理解；纯后端上下文增强，不引入新的前端交互（`server/app/agent/sub_agents/intent_analyzer.py`）。
 - **Diff 预览 + Apply + 撤销**：主表 dry-run 高亮；Apply 前快照，工具栏撤销恢复最近一次 Apply 前状态。
 
 ### 对话、记忆与存储

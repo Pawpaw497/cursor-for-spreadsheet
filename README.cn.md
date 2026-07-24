@@ -23,7 +23,7 @@
 
 - **Cmd+K 工作流**：自然语言 + 表 schema / 样本行 → LLM 生成 JSON 计划 → 表格内 Diff 预览 → Apply / 撤销。
 - **单表**（`/api/plan`）与**多表项目**（`/api/plan-project`）：列/行变换、join、lookup、聚合等；前后端共享 Plan 契约。
-- **Agent 模式**：`/api/agent`、`/api/agent-stream` — 多轮工具调用，歧义时可先澄清再出 Plan。
+- **Agent 模式**：`/api/agent`、`/api/agent-stream` — 多轮工具调用，附带表级语义画像（topic/description/granularity），歧义时可先澄清再出 Plan。
 - **技术栈**：React 18 + Vite + AG Grid；FastAPI + uv；**LangGraph · Pydantic AI**；OpenRouter / 本地 Ollama 双后端；SQLite 请求与 LLM 调用审计。
 - **文档**：功能详解见 [`docs/features.md`](docs/features.md)；技术索引 [`docs/README.md`](docs/README.md)；英文主 README [`README.md`](README.md)。
 
