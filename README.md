@@ -23,7 +23,7 @@ A **presentable, evolvable personal project** for applying the latest **agent te
 
 - **Cmd+K workflow**: Natural language + table schema / sample rows → LLM generates JSON plan → in-grid Diff preview → Apply / undo.
 - **Single-table** (`/api/plan`) and **multi-table projects** (`/api/plan-project`): column/row transforms, join, lookup, aggregation, etc.; shared Plan contract across frontend and backend.
-- **Agent mode**: `/api/agent`, `/api/agent-stream` — multi-turn tool calls; clarification before plan generation when ambiguous.
+- **Agent mode**: `/api/agent`, `/api/agent-stream` — multi-turn tool calls; per-table semantic profiling (topic/description/granularity); clarification before plan generation when ambiguous.
 - **Stack**: React 18 + Vite + AG Grid; FastAPI + uv; **LangGraph · Pydantic AI**; OpenRouter / local Ollama dual backends; SQLite request and LLM call audit.
 - **Documentation**: feature deep dive [`docs/features.md`](docs/features.md); technical index [`docs/README.md`](docs/README.md); Chinese README [`README.cn.md`](README.cn.md).
 

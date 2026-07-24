@@ -1,97 +1,97 @@
-<mxfile host="Electron" agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/29.0.3 Chrome/140.0.7339.249 Electron/38.7.0 Safari/537.36" version="29.0.3" pages="3">
+<mxfile host="Electron" agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/29.0.3 Chrome/140.0.7339.249 Electron/38.7.0 Safari/537.36" pages="3">
   <diagram id="langgraph-main" name="1 LangGraph Main Flow">
-    <mxGraphModel dx="976" dy="757" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1200" math="0" shadow="0">
+    <mxGraphModel dx="918" dy="721" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1200" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
-        <mxCell id="legend-title" value="Legend" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontStyle=1;fontSize=14;" parent="1" vertex="1">
-          <mxGeometry x="40" y="20" width="120" height="30" as="geometry" />
+        <mxCell id="legend-title" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontStyle=1;fontSize=14;" value="Legend" vertex="1">
+          <mxGeometry height="30" width="120" x="40" y="20" as="geometry" />
         </mxCell>
-        <mxCell id="legend-real" value="Solid = implemented" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" parent="1" vertex="1">
-          <mxGeometry x="40" y="50" width="180" height="36" as="geometry" />
+        <mxCell id="legend-real" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" value="Solid = implemented" vertex="1">
+          <mxGeometry height="36" width="180" x="40" y="50" as="geometry" />
         </mxCell>
-        <mxCell id="legend-stub" value="Dashed = stub / placeholder" style="rounded=1;whiteSpace=wrap;html=1;dashed=1;dashPattern=8 8;fillColor=#fff2cc;strokeColor=#d6b656;" parent="1" vertex="1">
-          <mxGeometry x="240" y="50" width="220" height="36" as="geometry" />
+        <mxCell id="legend-stub" parent="1" style="rounded=1;whiteSpace=wrap;html=1;dashed=1;dashPattern=8 8;fillColor=#fff2cc;strokeColor=#d6b656;" value="Dashed = stub / placeholder" vertex="1">
+          <mxGeometry height="36" width="220" x="240" y="50" as="geometry" />
         </mxCell>
-        <mxCell id="legend-unused" value="Gray = built but not wired" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;" parent="1" vertex="1">
-          <mxGeometry x="480" y="50" width="220" height="36" as="geometry" />
+        <mxCell id="legend-unused" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;" value="Gray = built but not wired" vertex="1">
+          <mxGeometry height="36" width="220" x="480" y="50" as="geometry" />
         </mxCell>
-        <mxCell id="lane-api" value="API Layer" style="swimlane;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;startSize=28;" parent="1" vertex="1">
-          <mxGeometry x="40" y="110" width="320" height="120" as="geometry" />
+        <mxCell id="lane-api" parent="1" style="swimlane;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;startSize=28;" value="API Layer" vertex="1">
+          <mxGeometry height="120" width="320" x="40" y="110" as="geometry" />
         </mxCell>
-        <mxCell id="api-route" value="agent.py&#xa;/api/agent (sync + SSE)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" parent="lane-api" vertex="1">
-          <mxGeometry x="20" y="40" width="130" height="60" as="geometry" />
+        <mxCell id="api-route" parent="lane-api" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" value="agent.py&#xa;/api/agent (sync + SSE)" vertex="1">
+          <mxGeometry height="60" width="130" x="20" y="40" as="geometry" />
         </mxCell>
-        <mxCell id="api-init" value="initial_state_from_&#xa;agent_project_request" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" parent="lane-api" vertex="1">
-          <mxGeometry x="170" y="40" width="130" height="60" as="geometry" />
+        <mxCell id="api-init" parent="lane-api" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" value="initial_state_from_&#xa;agent_project_request" vertex="1">
+          <mxGeometry height="60" width="130" x="170" y="40" as="geometry" />
         </mxCell>
-        <mxCell id="lane-graph" value="LangGraph — build_agent_graph()" style="swimlane;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;startSize=28;" parent="1" vertex="1">
-          <mxGeometry x="40" y="260" width="900" height="520" as="geometry" />
+        <mxCell id="lane-graph" parent="1" style="swimlane;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;startSize=28;" value="LangGraph — build_agent_graph()" vertex="1">
+          <mxGeometry height="520" width="900" x="40" y="260" as="geometry" />
         </mxCell>
-        <mxCell id="start" value="START" style="ellipse;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" parent="lane-graph" vertex="1">
-          <mxGeometry x="40" y="60" width="80" height="50" as="geometry" />
+        <mxCell id="start" parent="lane-graph" style="ellipse;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" value="START" vertex="1">
+          <mxGeometry height="50" width="80" x="40" y="60" as="geometry" />
         </mxCell>
-        <mxCell id="ctx-node" value="context_analyzer&#xa;_node_context" style="rounded=1;whiteSpace=wrap;html=1;dashed=1;dashPattern=8 8;fillColor=#fff2cc;strokeColor=#d6b656;" parent="lane-graph" vertex="1">
-          <mxGeometry x="160" y="55" width="150" height="60" as="geometry" />
+        <mxCell id="ctx-node" parent="lane-graph" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" value="context_analyzer&#xa;_node_context" vertex="1">
+          <mxGeometry height="60" width="150" x="160" y="55" as="geometry" />
         </mxCell>
-        <mxCell id="ctx-fn" value="analyze_context()&#xa;STUB: return state" style="rounded=1;whiteSpace=wrap;html=1;dashed=1;dashPattern=8 8;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" parent="lane-graph" vertex="1">
-          <mxGeometry x="160" y="130" width="150" height="50" as="geometry" />
+        <mxCell id="ctx-fn" parent="lane-graph" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" value="analyze_context()&#xa;builds DataContext, injects Data profile msg" vertex="1">
+          <mxGeometry height="50" width="150" x="160" y="130" as="geometry" />
         </mxCell>
-        <mxCell id="intent-node" value="intent_analyzer&#xa;_node_intent" style="rounded=1;whiteSpace=wrap;html=1;dashed=1;dashPattern=8 8;fillColor=#fff2cc;strokeColor=#d6b656;" parent="lane-graph" vertex="1">
-          <mxGeometry x="350" y="55" width="150" height="60" as="geometry" />
+        <mxCell id="intent-node" parent="lane-graph" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" value="intent_analyzer&#xa;_node_intent (async)" vertex="1">
+          <mxGeometry height="60" width="150" x="350" y="55" as="geometry" />
         </mxCell>
-        <mxCell id="intent-fn" value="analyze_intent()&#xa;STUB: return state" style="rounded=1;whiteSpace=wrap;html=1;dashed=1;dashPattern=8 8;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" parent="lane-graph" vertex="1">
-          <mxGeometry x="350" y="130" width="150" height="50" as="geometry" />
+        <mxCell id="intent-fn" parent="lane-graph" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" value="analyze_intent()&#xa;batch LLM classify topic/description/granularity, cached, fail-open" vertex="1">
+          <mxGeometry height="60" width="150" x="350" y="130" as="geometry" />
         </mxCell>
-        <mxCell id="llm-node" value="llm_decide&#xa;_node_llm_decide" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" parent="lane-graph" vertex="1">
-          <mxGeometry x="540" y="55" width="150" height="60" as="geometry" />
+        <mxCell id="llm-node" parent="lane-graph" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" value="llm_decide&#xa;_node_llm_decide" vertex="1">
+          <mxGeometry height="60" width="150" x="540" y="55" as="geometry" />
         </mxCell>
-        <mxCell id="tool-node" value="tool_exec&#xa;_node_tool" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" parent="lane-graph" vertex="1">
-          <mxGeometry x="540" y="220" width="150" height="60" as="geometry" />
+        <mxCell id="tool-node" parent="lane-graph" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" value="tool_exec&#xa;_node_tool" vertex="1">
+          <mxGeometry height="60" width="150" x="540" y="220" as="geometry" />
         </mxCell>
-        <mxCell id="end-node" value="END" style="ellipse;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" parent="lane-graph" vertex="1">
-          <mxGeometry x="740" y="55" width="80" height="50" as="geometry" />
+        <mxCell id="end-node" parent="lane-graph" style="ellipse;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" value="END" vertex="1">
+          <mxGeometry height="50" width="80" x="781" y="60" as="geometry" />
         </mxCell>
-        <mxCell id="lane-react" value="Inside llm_decide (implemented)" style="swimlane;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;startSize=28;" parent="lane-graph" vertex="1">
-          <mxGeometry x="160" y="300" width="530" height="180" as="geometry" />
+        <mxCell id="lane-react" parent="lane-graph" style="swimlane;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;startSize=28;" value="Inside llm_decide (implemented)" vertex="1">
+          <mxGeometry height="180" width="530" x="160" y="300" as="geometry" />
         </mxCell>
-        <mxCell id="react-step" value="agent_react_step()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" parent="lane-react" vertex="1">
-          <mxGeometry x="20" y="45" width="130" height="50" as="geometry" />
+        <mxCell id="react-step" parent="lane-react" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" value="agent_react_step()" vertex="1">
+          <mxGeometry height="50" width="130" x="20" y="45" as="geometry" />
         </mxCell>
-        <mxCell id="compaction" value="apply_message_&#xa;compaction" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" parent="lane-react" vertex="1">
-          <mxGeometry x="170" y="45" width="130" height="50" as="geometry" />
+        <mxCell id="compaction" parent="lane-react" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" value="apply_message_&#xa;compaction" vertex="1">
+          <mxGeometry height="50" width="130" x="170" y="45" as="geometry" />
         </mxCell>
-        <mxCell id="pa-step" value="pa_decision_step&#xa;(Pydantic AI)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" parent="lane-react" vertex="1">
-          <mxGeometry x="320" y="45" width="130" height="50" as="geometry" />
+        <mxCell id="pa-step" parent="lane-react" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" value="pa_decision_step&#xa;(Pydantic AI)" vertex="1">
+          <mxGeometry height="50" width="130" x="320" y="45" as="geometry" />
         </mxCell>
-        <mxCell id="terminal" value="Terminal actions:&#xa;output_plan | ask_clarification | finish" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" parent="lane-react" vertex="1">
-          <mxGeometry x="20" y="110" width="430" height="50" as="geometry" />
+        <mxCell id="terminal" parent="lane-react" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" value="Terminal actions:&#xa;output_plan | ask_clarification | finish" vertex="1">
+          <mxGeometry height="50" width="430" x="20" y="110" as="geometry" />
         </mxCell>
-        <mxCell id="e12" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="lane-react" source="react-step" target="compaction" edge="1">
+        <mxCell id="e12" edge="1" parent="lane-react" source="react-step" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="compaction">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="e13" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="lane-react" source="compaction" target="pa-step" edge="1">
+        <mxCell id="e13" edge="1" parent="lane-react" source="compaction" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="pa-step">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="plan-gen" value="plan_generator.py&#xa;NOT in graph — comment only" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;" parent="lane-graph" vertex="1">
-          <mxGeometry x="740" y="220" width="140" height="60" as="geometry" />
+        <mxCell id="plan-gen" parent="lane-graph" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;" value="plan_generator.py&#xa;NOT in graph — comment only" vertex="1">
+          <mxGeometry height="60" width="140" x="740" y="220" as="geometry" />
         </mxCell>
-        <mxCell id="e3" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="lane-graph" source="start" target="ctx-node" edge="1">
+        <mxCell id="e3" edge="1" parent="lane-graph" source="start" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="ctx-node" value="">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="e4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;dashed=1;" parent="lane-graph" source="ctx-node" target="ctx-fn" edge="1">
+        <mxCell id="e4" edge="1" parent="lane-graph" source="ctx-node" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="ctx-fn">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="e5" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="lane-graph" source="ctx-node" target="intent-node" edge="1">
+        <mxCell id="e5" edge="1" parent="lane-graph" source="ctx-node" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="intent-node" value="">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="e6" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;dashed=1;" parent="lane-graph" source="intent-node" target="intent-fn" edge="1">
+        <mxCell id="e6" edge="1" parent="lane-graph" source="intent-node" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="intent-fn">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="e7" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="lane-graph" source="intent-node" target="llm-node" edge="1">
+        <mxCell id="e7" edge="1" parent="lane-graph" source="intent-node" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="llm-node" value="">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="e8" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;" parent="lane-graph" source="llm-node" target="react-step" edge="1">
+        <mxCell id="e8" edge="1" parent="lane-graph" source="llm-node" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;" target="react-step">
           <mxGeometry relative="1" as="geometry">
             <Array as="points">
               <mxPoint x="615" y="200" />
@@ -99,40 +99,42 @@
             </Array>
           </mxGeometry>
         </mxCell>
-        <mxCell id="e9" value="call_tool" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="lane-graph" source="llm-node" target="tool-node" edge="1">
+        <mxCell id="e9" edge="1" parent="lane-graph" source="llm-node" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="tool-node" value="call_tool">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="e10" value="terminal" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="lane-graph" source="llm-node" target="end-node" edge="1">
+        <mxCell id="e10" edge="1" parent="lane-graph" source="llm-node" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="end-node" value="terminal">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="e11" value="loop" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="lane-graph" source="tool-node" target="llm-node" edge="1">
+        <mxCell id="e11" edge="1" parent="lane-graph" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" value="loop">
           <mxGeometry relative="1" as="geometry">
             <Array as="points">
-              <mxPoint x="615" y="200" />
-              <mxPoint x="700" y="200" />
-              <mxPoint x="700" y="85" />
+              <mxPoint x="616" y="200.05" />
+              <mxPoint x="720" y="200.05" />
+              <mxPoint x="720" y="85" />
             </Array>
+            <mxPoint x="616.047619047619" y="220" as="sourcePoint" />
+            <mxPoint x="691" y="85" as="targetPoint" />
           </mxGeometry>
         </mxCell>
-        <mxCell id="lane-outer" value="Outer loop (optional preview_lifecycle)" style="swimlane;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;startSize=28;" parent="1" vertex="1">
-          <mxGeometry x="980" y="260" width="280" height="200" as="geometry" />
+        <mxCell id="lane-outer" parent="1" style="swimlane;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;startSize=28;" value="Outer loop (optional preview_lifecycle)" vertex="1">
+          <mxGeometry height="200" width="280" x="980" y="260" as="geometry" />
         </mxCell>
-        <mxCell id="preview" value="evaluate_output_plan_preview&#xa;dry-run + revise loop" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" parent="lane-outer" vertex="1">
-          <mxGeometry x="20" y="50" width="240" height="60" as="geometry" />
+        <mxCell id="preview" parent="lane-outer" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" value="evaluate_output_plan_preview&#xa;dry-run + revise loop" vertex="1">
+          <mxGeometry height="60" width="240" x="20" y="50" as="geometry" />
         </mxCell>
-        <mxCell id="preview-revise" value="on revise → re-run graph&#xa;from START" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" parent="lane-outer" vertex="1">
-          <mxGeometry x="20" y="125" width="240" height="50" as="geometry" />
+        <mxCell id="preview-revise" parent="lane-outer" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" value="on revise → re-run graph&#xa;from START" vertex="1">
+          <mxGeometry height="50" width="240" x="20" y="125" as="geometry" />
         </mxCell>
-        <mxCell id="e1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="1" source="api-route" target="api-init" edge="1">
+        <mxCell id="e1" edge="1" parent="1" source="api-route" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="api-init">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="e2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="1" source="api-init" target="start" edge="1">
+        <mxCell id="e2" edge="1" parent="1" source="api-init" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="start">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="e14" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;dashed=1;" parent="1" source="end-node" target="preview" edge="1">
+        <mxCell id="e14" edge="1" parent="1" source="end-node" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;dashed=1;" target="preview">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="e15" value="revise" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;dashed=1;" parent="1" source="preview-revise" target="start" edge="1">
+        <mxCell id="e15" edge="1" parent="1" source="preview-revise" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;dashed=1;" target="start" value="revise">
           <mxGeometry relative="1" as="geometry">
             <Array as="points">
               <mxPoint x="1120" y="520" />
@@ -176,11 +178,11 @@
         <mxCell id="state" value="AgentState&#xa;(tables, messages, memory, request_context)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;" vertex="1" parent="1">
           <mxGeometry x="460" y="390" width="300" height="60" as="geometry" />
         </mxCell>
-        <mxCell id="lane-ingraph" value="Inside graph — context_analyzer (STUB)" style="swimlane;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;startSize=28;" vertex="1" parent="1">
+        <mxCell id="lane-ingraph" value="Inside graph — context_analyzer (implemented)" style="swimlane;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;startSize=28;" vertex="1" parent="1">
           <mxGeometry x="80" y="500" width="400" height="140" as="geometry" />
         </mxCell>
-        <mxCell id="analyze-ctx" value="analyze_context()&#xa;return state unchanged" style="rounded=1;whiteSpace=wrap;html=1;dashed=1;dashPattern=8 8;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="lane-ingraph">
-          <mxGeometry x="40" y="50" width="200" height="60" as="geometry" />
+        <mxCell id="analyze-ctx" value="analyze_context()&#xa;builds DataContext (per-table column stats) from store, injects Data profile msg" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="lane-ingraph">
+          <mxGeometry x="40" y="50" width="320" height="70" as="geometry" />
         </mxCell>
         <mxCell id="lane-unused" value="Built but not wired to main flow" style="swimlane;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;startSize=28;fontColor=#333333;" vertex="1" parent="1">
           <mxGeometry x="520" y="500" width="420" height="140" as="geometry" />
@@ -221,7 +223,7 @@
         <mxCell id="c7" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="1" source="memory" target="state">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="c8" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;dashed=1;" edge="1" parent="1" source="state" target="analyze-ctx">
+        <mxCell id="c8" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="1" source="state" target="analyze-ctx">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
         <mxCell id="c9" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;dashed=1;strokeColor=#999999;" edge="1" parent="1" source="assembler" target="state">
